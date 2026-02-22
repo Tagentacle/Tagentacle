@@ -110,8 +110,8 @@ The CLI provides the primary interface for developers:
 
 ## 📝 Roadmap & Todo
 
-- [ ] **Core Service Support**: Implement `advertise_service` and `call_service` in the Rust Daemon.
-- [ ] **Service API in SDK**: Add `node.call_service()` and `@node.service()` support to `tagentacle-py`.
+- [x] **Core Service Support**: Implement `advertise_service` and `call_service` in the Rust Daemon.
+- [x] **Service API in SDK**: Add `node.call_service()` and `@node.service()` support to `tagentacle-py`.
 - [ ] **CLI Implementation**: Complete major commands (`run`, `launch`, `list`, `echo`) in the `tagentacle` binary.
 - [ ] **MCP Bridge**: Built-in `tagentacle bridge --mcp` to map standard MCP servers into the bus.
 - [ ] **Action Mode**: Implement long-running task patterns with feedback loops.

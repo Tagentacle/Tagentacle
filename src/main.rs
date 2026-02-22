@@ -22,13 +22,32 @@ enum Action {
         sender: String,
         payload: Value,
     },
-    // 将来扩展: AdvertiseService, CallService 等
+    AdvertiseService {
+        service: String,
+        node_id: String,
+    },
+    CallService {
+        service: String,
+        request_id: String,
+        payload: Value,
+        caller_id: String,
+    },
+    ServiceResponse {
+        service: String,
+        request_id: String,
+        payload: Value,
+        caller_id: String,
+    },
 }
 
 /// 内部路由表结构
 struct Router {
     // topic -> Vec<(node_id, tx)>
     subscriptions: HashMap<String, Vec<(String, mpsc::UnboundedSender<Value>)>>,
+    // service -> (node_id, tx)
+    services: HashMap<String, (String, mpsc::UnboundedSender<Value>)>,
+    // node_id -> tx (用于全双工路由)
+    nodes: HashMap<String, mpsc::UnboundedSender<Value>>,
 }
 
 type SharedRouter = Arc<Mutex<Router>>;
@@ -41,6 +60,8 @@ async fn main() -> Result<()> {
 
     let router = Arc::new(Mutex::new(Router {
         subscriptions: HashMap::new(),
+        services: HashMap::new(),
+        nodes: HashMap::new(),
     }));
 
     loop {
@@ -86,6 +107,7 @@ async fn handle_connection(socket: TcpStream, router: SharedRouter) -> Result<()
                                 current_node_id = Some(node_id.clone());
                                 
                                 let mut r = router.lock().await;
+                                r.nodes.insert(node_id.clone(), tx.clone());
                                 let entry = r.subscriptions.entry(topic).or_insert_with(Vec::new);
                                 // 无论是否已订阅，加入 Sender
                                 entry.push((node_id, tx.clone()));
@@ -104,6 +126,46 @@ async fn handle_connection(socket: TcpStream, router: SharedRouter) -> Result<()
                                     for (_, sub_tx) in subs {
                                         let _ = sub_tx.send(push_msg.clone());
                                     }
+                                }
+                            }
+                            Action::AdvertiseService { service, node_id } => {
+                                println!("Node '{}' advertised service '{}'", node_id, service);
+                                current_node_id = Some(node_id.clone());
+                                let mut r = router.lock().await;
+                                r.nodes.insert(node_id.clone(), tx.clone());
+                                r.services.insert(service, (node_id, tx.clone()));
+                            }
+                            Action::CallService { service, request_id, payload, caller_id } => {
+                                println!("Service call: {} from {} (id: {})", service, caller_id, request_id);
+                                let mut r = router.lock().await;
+                                r.nodes.insert(caller_id.clone(), tx.clone());
+                                if let Some((_target_node, service_tx)) = r.services.get(&service) {
+                                    let push_msg = json!({
+                                        "op": "call_service",
+                                        "service": service,
+                                        "request_id": request_id,
+                                        "payload": payload,
+                                        "caller_id": caller_id
+                                    });
+                                    let _ = service_tx.send(push_msg);
+                                } else {
+                                    eprintln!("Service '{}' not found!", service);
+                                }
+                            }
+                            Action::ServiceResponse { service, request_id, payload, caller_id } => {
+                                println!("Service response: {} to {} (id: {})", service, caller_id, request_id);
+                                let r = router.lock().await;
+                                if let Some(caller_tx) = r.nodes.get(&caller_id) {
+                                    let push_msg = json!({
+                                        "op": "service_response",
+                                        "service": service,
+                                        "request_id": request_id,
+                                        "payload": payload,
+                                        "caller_id": caller_id
+                                    });
+                                    let _ = caller_tx.send(push_msg);
+                                } else {
+                                    eprintln!("Caller '{}' not found in routing table!", caller_id);
                                 }
                             }
                         }
