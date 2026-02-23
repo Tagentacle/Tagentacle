@@ -37,6 +37,45 @@ enum Commands {
         #[arg(short, long)]
         node_id: Option<String>,
     },
+    /// Topic introspection commands
+    Topic {
+        #[command(subcommand)]
+        action: TopicAction,
+    },
+    /// Service introspection commands
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+    /// Health check: verify daemon connectivity
+    Doctor {
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TopicAction {
+    /// Subscribe to a topic and print messages in real-time
+    Echo {
+        /// Topic to subscribe to (e.g., /chat/global)
+        topic: String,
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// Call a service with a JSON payload
+    Call {
+        /// Service name (e.g., /math/add)
+        service: String,
+        /// JSON payload (e.g., '{"a": 1, "b": 2}')
+        payload: String,
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -117,6 +156,19 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Bridge { mcp, node_id }) => {
             run_bridge(mcp, node_id).await?;
+        }
+        Some(Commands::Topic { action }) => match action {
+            TopicAction::Echo { topic, addr } => {
+                run_topic_echo(addr, topic).await?;
+            }
+        },
+        Some(Commands::Service { action }) => match action {
+            ServiceAction::Call { service, payload, addr } => {
+                run_service_call(addr, service, payload).await?;
+            }
+        },
+        Some(Commands::Doctor { addr }) => {
+            run_doctor(addr).await?;
         }
         None => {
             // Default to daemon for backward compatibility
@@ -325,3 +377,100 @@ async fn run_bridge(mcp_cmd: String, node_id_opt: Option<String>) -> Result<()> 
     Ok(())
 }
 
+// --- CLI Tool: topic echo ---
+
+async fn run_topic_echo(addr: String, topic: String) -> Result<()> {
+    let node_id = format!("cli_echo_{}", &Uuid::new_v4().to_string()[..8]);
+    println!("Subscribing to '{}' as node '{}'...", topic, node_id);
+
+    let stream = TcpStream::connect(&addr).await
+        .context("Failed to connect to Tagentacle Daemon. Is it running?")?;
+    let mut framed = Framed::new(stream, LinesCodec::new());
+
+    // Subscribe
+    let sub = json!({
+        "op": "subscribe",
+        "topic": topic,
+        "node_id": node_id
+    });
+    framed.send(sub.to_string()).await?;
+
+    println!("Listening on '{}'... (Ctrl+C to stop)", topic);
+
+    while let Some(Ok(line)) = framed.next().await {
+        if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+            if msg.get("op").and_then(|v| v.as_str()) == Some("message") {
+                let sender = msg.get("sender").and_then(|v| v.as_str()).unwrap_or("?");
+                let payload = msg.get("payload").unwrap_or(&Value::Null);
+                println!("[{}] {}", sender, serde_json::to_string_pretty(payload)?);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// --- CLI Tool: service call ---
+
+async fn run_service_call(addr: String, service: String, payload_str: String) -> Result<()> {
+    let node_id = format!("cli_caller_{}", &Uuid::new_v4().to_string()[..8]);
+    let request_id = Uuid::new_v4().to_string();
+
+    let payload: Value = serde_json::from_str(&payload_str)
+        .context("Invalid JSON payload. Use single quotes around the JSON string.")?;
+
+    println!("Calling service '{}' as node '{}'...", service, node_id);
+
+    let stream = TcpStream::connect(&addr).await
+        .context("Failed to connect to Tagentacle Daemon. Is it running?")?;
+    let mut framed = Framed::new(stream, LinesCodec::new());
+
+    // Send service call
+    let call = json!({
+        "op": "call_service",
+        "service": service,
+        "request_id": request_id,
+        "payload": payload,
+        "caller_id": node_id
+    });
+    framed.send(call.to_string()).await?;
+
+    // Wait for response
+    println!("Waiting for response...");
+    while let Some(Ok(line)) = framed.next().await {
+        if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+            if msg.get("op").and_then(|v| v.as_str()) == Some("service_response") {
+                if msg.get("request_id").and_then(|v| v.as_str()) == Some(&request_id) {
+                    let result = msg.get("payload").unwrap_or(&Value::Null);
+                    println!("Response:\n{}", serde_json::to_string_pretty(result)?);
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    println!("No response received (connection closed).");
+    Ok(())
+}
+
+// --- CLI Tool: doctor ---
+
+async fn run_doctor(addr: String) -> Result<()> {
+    println!("Tagentacle Doctor");
+    println!("=================");
+    print!("Checking daemon at {}... ", addr);
+
+    match TcpStream::connect(&addr).await {
+        Ok(_) => {
+            println!("OK ✓");
+            println!("Daemon is running and accepting connections.");
+        }
+        Err(e) => {
+            println!("FAILED ✗");
+            println!("Could not connect to daemon: {}", e);
+            println!("Try: tagentacle daemon --addr {}", addr);
+        }
+    }
+
+    Ok(())
+}
