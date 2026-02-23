@@ -276,5 +276,5 @@ tagentacle setup clean --workspace .
 
 3. **Run a Node** (Python SDK):
    ```bash
-   tagentacle run --pkg examples/mcp_server_pkg
+   tagentacle run --pkg examples/src/mcp_server_pkg
    ```

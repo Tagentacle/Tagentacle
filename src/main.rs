@@ -721,7 +721,7 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
     // Launch nodes in order
     let mut processes: Vec<(String, tokio::process::Child)> = Vec::new();
     let nodes_dir = config_dir.parent().unwrap_or(config_dir)
-        .parent().unwrap_or(config_dir); // Go up from launch/ to bringup_pkg/ to examples/
+        .parent().unwrap_or(config_dir); // Go up from launch/ to bringup_pkg/ to src/
 
     for node in &config.nodes {
         // Wait for dependencies
