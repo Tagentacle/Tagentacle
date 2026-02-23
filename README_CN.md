@@ -223,16 +223,16 @@ CLI 是开发者的主要交互入口：
 - [x] **示例**：`talker/listener` (Pub/Sub) 和 `service_server/service_client` (Service) 演示。
 
 ### 进行中
-- [ ] **修复编译**：`Cargo.toml` 添加缺失的 `clap` 和 `uuid` 依赖。
-- [ ] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
-- [ ] **MCP Transport 层**：在 `tagentacle-py` 中实现 `TagentacleClientTransport` 和 `TagentacleServerTransport`。
-- [ ] **`tagentacle.toml` 规范**：定义并解析包清单格式。
+- [x] **修复编译**：`Cargo.toml` 添加缺失的 `clap` 和 `uuid` 依赖。
+- [x] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
+- [x] **MCP Transport 层**：在 `tagentacle-py` 中实现 `TagentacleClientTransport` 和 `TagentacleServerTransport`。
+- [x] **`tagentacle.toml` 规范**：定义并解析包清单格式。
 - [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
 
 ### 计划中
-- [ ] **MCP-Publish 桥接器节点**：内置 MCP Server，将 `publish()` 暴露为 MCP Tool。
-- [ ] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
-- [ ] **CLI 扩展**：`run`、`launch`、`topic list/echo`、`service list/call`、`doctor`、`setup/dep`。
+- [x] **MCP-Publish 桥接器节点**：内置 MCP Server，将 `publish()` 暴露为 MCP Tool。
+- [x] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
+- [x] **CLI 扩展（部分）**：已实现 `topic echo`、`service call`、`doctor`。`run`、`launch`、`topic list`、`service list`、`setup/dep` 待实现。
 - [ ] **节点生命周期追踪**：Daemon 侧心跳/存活监控。
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
