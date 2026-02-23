@@ -4,6 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -52,6 +53,28 @@ enum Commands {
         #[arg(short, long, default_value = "127.0.0.1:19999")]
         addr: String,
     },
+    /// Run a single Tagentacle package by its directory
+    Run {
+        /// Path to the package directory (must contain tagentacle.toml)
+        #[arg(long)]
+        pkg: String,
+        /// Daemon address
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+    },
+    /// Launch a system topology from a TOML config file
+    Launch {
+        /// Path to the launch TOML config file
+        config: String,
+        /// Daemon address
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+    },
+    /// Install dependencies for a package or the entire workspace
+    Setup {
+        #[command(subcommand)]
+        action: SetupAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -75,6 +98,16 @@ enum ServiceAction {
         payload: String,
         #[arg(short, long, default_value = "127.0.0.1:19999")]
         addr: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SetupAction {
+    /// Install dependencies for a package
+    Dep {
+        /// Path to the package directory (must contain tagentacle.toml)
+        #[arg(long, default_value = ".")]
+        pkg: String,
     },
 }
 
@@ -170,6 +203,17 @@ async fn main() -> Result<()> {
         Some(Commands::Doctor { addr }) => {
             run_doctor(addr).await?;
         }
+        Some(Commands::Run { pkg, addr }) => {
+            run_package(pkg, addr).await?;
+        }
+        Some(Commands::Launch { config, addr }) => {
+            run_launch(config, addr).await?;
+        }
+        Some(Commands::Setup { action }) => match action {
+            SetupAction::Dep { pkg } => {
+                run_setup_dep(pkg).await?;
+            }
+        },
         None => {
             // Default to daemon for backward compatibility
             run_daemon("127.0.0.1:19999".to_string()).await?;
@@ -470,6 +514,442 @@ async fn run_doctor(addr: String) -> Result<()> {
             println!("Could not connect to daemon: {}", e);
             println!("Try: tagentacle daemon --addr {}", addr);
         }
+    }
+
+    Ok(())
+}
+
+// --- CLI Tool: run ---
+
+/// Parse a minimal tagentacle.toml to extract package info
+fn parse_pkg_toml(path: &Path) -> Result<Value> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Cannot read {}", path.display()))?;
+    // Minimal TOML parser: extract key = "value" pairs
+    // For a real implementation, use the `toml` crate
+    let mut map = serde_json::Map::new();
+    let mut section = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            section = trimmed[1..trimmed.len()-1].to_string();
+            continue;
+        }
+        if let Some(eq_pos) = trimmed.find('=') {
+            let key = trimmed[..eq_pos].trim();
+            let val = trimmed[eq_pos+1..].trim().trim_matches('"');
+            let full_key = if section.is_empty() {
+                key.to_string()
+            } else {
+                format!("{}.{}", section, key)
+            };
+            map.insert(full_key, Value::String(val.to_string()));
+        }
+    }
+    Ok(Value::Object(map))
+}
+
+async fn run_package(pkg_path: String, addr: String) -> Result<()> {
+    let pkg_dir = PathBuf::from(&pkg_path).canonicalize()
+        .with_context(|| format!("Package directory not found: {}", pkg_path))?;
+    let toml_path = pkg_dir.join("tagentacle.toml");
+
+    if !toml_path.exists() {
+        anyhow::bail!("No tagentacle.toml found in {}", pkg_dir.display());
+    }
+
+    let pkg_info = parse_pkg_toml(&toml_path)?;
+    let pkg_name = pkg_info.get("package.name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let entry = pkg_info.get("entry_points.node")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    println!("Running package: {} ({})", pkg_name, pkg_dir.display());
+
+    // Determine the command to run
+    // Detect python executable: prefer python3, fall back to python
+    let python = if std::process::Command::new("python3").arg("--version").output().is_ok() {
+        "python3"
+    } else {
+        "python"
+    };
+
+    let command = if !entry.is_empty() {
+        // entry_points.node = "server:main" -> python3 -c "from server import main; ..."
+        let parts: Vec<&str> = entry.split(':').collect();
+        if parts.len() == 2 {
+            format!("{} -c \"from {} import {}; import asyncio; asyncio.run({}())\"", python, parts[0], parts[1], parts[1])
+        } else {
+            format!("{} {}", python, entry)
+        }
+    } else {
+        // Fallback: look for common entry files
+        if pkg_dir.join("main.py").exists() {
+            format!("{} main.py", python)
+        } else if pkg_dir.join("server.py").exists() {
+            format!("{} server.py", python)
+        } else if pkg_dir.join("client.py").exists() {
+            format!("{} client.py", python)
+        } else {
+            anyhow::bail!("No entry point found in {} (set entry_points.node in tagentacle.toml)", pkg_dir.display());
+        }
+    };
+
+    println!("Command: {}", command);
+
+    // Find SDK path (walk up to find tagentacle-py/)
+    let sdk_path = find_sdk_path(&pkg_dir);
+
+    let mut child = Command::new("sh")
+        .args(["-c", &command])
+        .current_dir(&pkg_dir)
+        .env("TAGENTACLE_DAEMON_URL", format!("tcp://{}", addr))
+        .env("PYTHONPATH", sdk_path.unwrap_or_default())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("Failed to start package process")?;
+
+    let status = child.wait().await?;
+    if !status.success() {
+        eprintln!("Package exited with status: {}", status);
+    }
+    Ok(())
+}
+
+fn find_sdk_path(from: &Path) -> Option<String> {
+    let mut dir = from.to_path_buf();
+    for _ in 0..10 {
+        let candidate = dir.join("tagentacle-py");
+        if candidate.is_dir() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+        if !dir.pop() { break; }
+    }
+    None
+}
+
+// --- CLI Tool: launch ---
+
+async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
+    let config_file = PathBuf::from(&config_path).canonicalize()
+        .with_context(|| format!("Launch config not found: {}", config_path))?;
+    let config_dir = config_file.parent().unwrap();
+
+    println!("Tagentacle Launch");
+    println!("=================");
+    println!("Config: {}", config_file.display());
+
+    // Parse the TOML launch config (minimal parser)
+    let content = std::fs::read_to_string(&config_file)?;
+    let config = parse_launch_toml(&content)?;
+
+    // Check daemon connectivity
+    let addr = config.daemon_addr.as_deref().unwrap_or(&daemon_addr);
+    print!("Checking daemon at {}... ", addr);
+    match TcpStream::connect(addr).await {
+        Ok(_) => println!("OK ✓"),
+        Err(_) => {
+            println!("NOT RUNNING");
+            println!("Starting daemon...");
+            let _daemon = Command::new("sh")
+                .args(["-c", &format!("{} daemon --addr {}",
+                    std::env::current_exe()?.display(), addr)])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Failed to start daemon")?;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+
+    // Find SDK path from config directory
+    let sdk_path = find_sdk_path(config_dir).unwrap_or_default();
+
+    // Build env vars from parameters
+    let mut env_vars: HashMap<String, String> = HashMap::new();
+    env_vars.insert("TAGENTACLE_DAEMON_URL".to_string(), format!("tcp://{}", addr));
+    env_vars.insert("PYTHONPATH".to_string(), sdk_path);
+    for (k, v) in &config.parameters {
+        env_vars.insert(k.clone(), v.clone());
+    }
+
+    // Load secrets file if configured
+    if let Some(ref secrets_file) = config.secrets_file {
+        // Resolve relative to the bringup pkg directory (2 levels up from launch/)
+        let bringup_dir = config_dir.parent().unwrap_or(config_dir);
+        let secrets_path = bringup_dir.join(secrets_file);
+        if secrets_path.exists() {
+            env_vars.insert("TAGENTACLE_SECRETS_FILE".to_string(),
+                secrets_path.to_string_lossy().to_string());
+            println!("Secrets: {} ✓", secrets_path.display());
+        } else {
+            println!("Secrets: {} (not found, skipped)", secrets_path.display());
+        }
+    }
+
+    // Launch nodes in order
+    let mut processes: Vec<(String, tokio::process::Child)> = Vec::new();
+    let nodes_dir = config_dir.parent().unwrap_or(config_dir)
+        .parent().unwrap_or(config_dir); // Go up from launch/ to bringup_pkg/ to examples/
+
+    for node in &config.nodes {
+        // Wait for dependencies
+        for dep in &node.depends_on {
+            if !processes.iter().any(|(n, _)| n == dep) {
+                println!("[{}] Warning: dependency '{}' not found", node.name, dep);
+            }
+        }
+
+        if node.startup_delay > 0 {
+            println!("[{}] Waiting {}s...", node.name, node.startup_delay);
+            tokio::time::sleep(std::time::Duration::from_secs(node.startup_delay)).await;
+        }
+
+        let pkg_dir = nodes_dir.join(&node.package);
+        if !pkg_dir.exists() {
+            eprintln!("[{}] Package dir not found: {}", node.name, pkg_dir.display());
+            continue;
+        }
+
+        println!("[{}] Starting: {} (in {})", node.name, node.command, pkg_dir.display());
+
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &node.command])
+            .current_dir(&pkg_dir)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+
+        for (k, v) in &env_vars {
+            cmd.env(k, v);
+        }
+
+        match cmd.spawn() {
+            Ok(child) => {
+                processes.push((node.name.clone(), child));
+            }
+            Err(e) => {
+                eprintln!("[{}] Failed to start: {}", node.name, e);
+            }
+        }
+    }
+
+    if processes.is_empty() {
+        println!("No nodes launched.");
+        return Ok(());
+    }
+
+    // Wait for the last process (typically the agent)
+    let last_name = processes.last().map(|(n, _)| n.clone()).unwrap_or_default();
+    println!("\nWaiting for '{}' to complete...", last_name);
+
+    if let Some((_, proc)) = processes.last_mut() {
+        let _ = proc.wait().await;
+    }
+
+    // Graceful shutdown
+    println!("\n--- Shutting down ---");
+    for (name, mut proc) in processes.into_iter().rev() {
+        if let Ok(None) = proc.try_wait() {
+            let _ = proc.kill().await;
+            println!("[{}] terminated.", name);
+        }
+    }
+
+    println!("Launch complete.");
+    Ok(())
+}
+
+struct LaunchConfig {
+    daemon_addr: Option<String>,
+    nodes: Vec<LaunchNode>,
+    parameters: HashMap<String, String>,
+    secrets_file: Option<String>,
+}
+
+struct LaunchNode {
+    name: String,
+    package: String,
+    command: String,
+    depends_on: Vec<String>,
+    startup_delay: u64,
+}
+
+fn parse_launch_toml(content: &str) -> Result<LaunchConfig> {
+    let mut config = LaunchConfig {
+        daemon_addr: None,
+        nodes: Vec::new(),
+        parameters: HashMap::new(),
+        secrets_file: None,
+    };
+
+    let mut current_section = String::new();
+    let mut current_node: Option<LaunchNode> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Section headers
+        if trimmed == "[[nodes]]" {
+            if let Some(node) = current_node.take() {
+                config.nodes.push(node);
+            }
+            current_node = Some(LaunchNode {
+                name: String::new(),
+                package: String::new(),
+                command: String::new(),
+                depends_on: Vec::new(),
+                startup_delay: 0,
+            });
+            current_section = "nodes".to_string();
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if let Some(node) = current_node.take() {
+                config.nodes.push(node);
+            }
+            current_section = trimmed[1..trimmed.len()-1].to_string();
+            continue;
+        }
+
+        // Key-value pairs
+        if let Some(eq_pos) = trimmed.find('=') {
+            let key = trimmed[..eq_pos].trim();
+            let raw_val = trimmed[eq_pos+1..].trim();
+
+            match current_section.as_str() {
+                "daemon" => {
+                    if key == "addr" {
+                        config.daemon_addr = Some(raw_val.trim_matches('"').to_string());
+                    }
+                }
+                "nodes" => {
+                    if let Some(ref mut node) = current_node {
+                        match key {
+                            "name" => node.name = raw_val.trim_matches('"').to_string(),
+                            "package" => node.package = raw_val.trim_matches('"').to_string(),
+                            "command" => node.command = raw_val.trim_matches('"').to_string(),
+                            "startup_delay" => {
+                                node.startup_delay = raw_val.parse().unwrap_or(0)
+                            }
+                            "depends_on" => {
+                                // Parse ["dep1", "dep2"]
+                                let inner = raw_val.trim_matches(|c| c == '[' || c == ']');
+                                node.depends_on = inner.split(',')
+                                    .map(|s| s.trim().trim_matches('"').to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "parameters" => {
+                    config.parameters.insert(
+                        key.to_string(),
+                        raw_val.trim_matches('"').to_string(),
+                    );
+                }
+                "secrets" => {
+                    if key == "secrets_file" {
+                        config.secrets_file = Some(raw_val.trim_matches('"').to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Don't forget the last node
+    if let Some(node) = current_node {
+        config.nodes.push(node);
+    }
+
+    Ok(config)
+}
+
+// --- CLI Tool: setup dep ---
+
+async fn run_setup_dep(pkg_path: String) -> Result<()> {
+    let pkg_dir = PathBuf::from(&pkg_path).canonicalize()
+        .with_context(|| format!("Package directory not found: {}", pkg_path))?;
+    let toml_path = pkg_dir.join("tagentacle.toml");
+
+    if !toml_path.exists() {
+        anyhow::bail!("No tagentacle.toml found in {}", pkg_dir.display());
+    }
+
+    let pkg_info = parse_pkg_toml(&toml_path)?;
+    let pkg_name = pkg_info.get("package.name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    println!("Installing dependencies for: {}", pkg_name);
+
+    // Extract python dependencies from dependencies.python
+    // In our minimal parser, array values become a single string
+    // Look for lines like: python = ["mcp", "anyio"]
+    let content = std::fs::read_to_string(&toml_path)?;
+    let mut python_deps: Vec<String> = Vec::new();
+    let mut in_deps_section = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_deps_section = trimmed == "[dependencies]";
+            continue;
+        }
+        if in_deps_section {
+            if trimmed.starts_with("python") {
+                if let Some(eq_pos) = trimmed.find('=') {
+                    let val = trimmed[eq_pos+1..].trim();
+                    // Parse ["dep1", "dep2"]
+                    let inner = val.trim_matches(|c| c == '[' || c == ']');
+                    for dep in inner.split(',') {
+                        let d = dep.trim().trim_matches('"').trim_matches('\'');
+                        if !d.is_empty() {
+                            python_deps.push(d.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if python_deps.is_empty() {
+        println!("No Python dependencies found in tagentacle.toml");
+        return Ok(());
+    }
+
+    println!("Python dependencies: {}", python_deps.join(", "));
+
+    // Run pip install (try python3 -m pip, then python -m pip, then uv pip)
+    let deps_str = python_deps.join(" ");
+    let install_cmd = format!(
+        "python3 -m pip install {} 2>/dev/null || python -m pip install {} 2>/dev/null || uv pip install {}",
+        deps_str, deps_str, deps_str
+    );
+    let mut child = Command::new("sh")
+        .args(["-c", &install_cmd])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("Failed to run pip install")?;
+
+    let status = child.wait().await?;
+    if status.success() {
+        println!("✓ Dependencies installed successfully.");
+    } else {
+        eprintln!("✗ pip install failed with status: {}", status);
     }
 
     Ok(())
