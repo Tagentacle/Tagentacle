@@ -103,11 +103,20 @@ enum ServiceAction {
 
 #[derive(Subcommand)]
 enum SetupAction {
-    /// Install dependencies for a package
+    /// Install dependencies via `uv sync` (requires uv)
     Dep {
-        /// Path to the package directory (must contain tagentacle.toml)
+        /// Path to a single package directory (must contain pyproject.toml)
+        #[arg(long)]
+        pkg: Option<String>,
+        /// Scan a workspace directory for all packages and install deps
+        #[arg(long)]
+        all: Option<String>,
+    },
+    /// Remove install/ workspace structure (reverse of dep)
+    Clean {
+        /// Workspace root directory
         #[arg(long, default_value = ".")]
-        pkg: String,
+        workspace: String,
     },
 }
 
@@ -210,8 +219,16 @@ async fn main() -> Result<()> {
             run_launch(config, addr).await?;
         }
         Some(Commands::Setup { action }) => match action {
-            SetupAction::Dep { pkg } => {
-                run_setup_dep(pkg).await?;
+            SetupAction::Dep { pkg, all } => {
+                if let Some(ws) = all {
+                    run_setup_all(ws).await?;
+                } else {
+                    let p = pkg.unwrap_or_else(|| ".".to_string());
+                    run_setup_dep(p).await?;
+                }
+            }
+            SetupAction::Clean { workspace } => {
+                run_setup_clean(workspace).await?;
             }
         },
         None => {
@@ -877,80 +894,256 @@ fn parse_launch_toml(content: &str) -> Result<LaunchConfig> {
     Ok(config)
 }
 
-// --- CLI Tool: setup dep ---
+// --- CLI Tool: setup dep (uv sync) ---
 
+/// Run `uv sync` in a single package directory.
+/// The package must have a pyproject.toml (i.e. be a uv project).
 async fn run_setup_dep(pkg_path: String) -> Result<()> {
     let pkg_dir = PathBuf::from(&pkg_path).canonicalize()
         .with_context(|| format!("Package directory not found: {}", pkg_path))?;
+
+    let pyproject = pkg_dir.join("pyproject.toml");
     let toml_path = pkg_dir.join("tagentacle.toml");
 
-    if !toml_path.exists() {
-        anyhow::bail!("No tagentacle.toml found in {}", pkg_dir.display());
+    let pkg_name = if toml_path.exists() {
+        let info = parse_pkg_toml(&toml_path)?;
+        info.get("package.name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string()
+    } else {
+        pkg_dir.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+
+    if !pyproject.exists() {
+        println!("[{}] ⚠ No pyproject.toml found — not a uv project.", pkg_name);
+        println!("    Please configure the environment manually with uv.");
+        println!("    Hint: cd {} && uv init --vcs none", pkg_dir.display());
+        return Ok(());
     }
 
-    let pkg_info = parse_pkg_toml(&toml_path)?;
-    let pkg_name = pkg_info.get("package.name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
+    println!("[{}] Running uv sync in {}...", pkg_name, pkg_dir.display());
 
-    println!("Installing dependencies for: {}", pkg_name);
+    let mut child = Command::new("uv")
+        .arg("sync")
+        .current_dir(&pkg_dir)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("Failed to run `uv sync`. Is uv installed?")?;
 
-    // Extract python dependencies from dependencies.python
-    // In our minimal parser, array values become a single string
-    // Look for lines like: python = ["mcp", "anyio"]
-    let content = std::fs::read_to_string(&toml_path)?;
-    let mut python_deps: Vec<String> = Vec::new();
-    let mut in_deps_section = false;
+    let status = child.wait().await?;
+    if status.success() {
+        println!("[{}] ✓ Dependencies synced.", pkg_name);
+    } else {
+        eprintln!("[{}] ✗ uv sync failed (exit {}).", pkg_name, status);
+    }
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_deps_section = trimmed == "[dependencies]";
-            continue;
+    Ok(())
+}
+
+/// Scan a workspace directory for all tagentacle packages and run `uv sync` in each.
+/// Then generate the install/ workspace structure with symlinks.
+async fn run_setup_all(workspace_path: String) -> Result<()> {
+    let ws = PathBuf::from(&workspace_path).canonicalize()
+        .with_context(|| format!("Workspace not found: {}", workspace_path))?;
+
+    println!("Tagentacle Setup — Workspace: {}", ws.display());
+    println!("==========================================");
+
+    // Recursively find directories containing tagentacle.toml
+    let pkgs = find_all_packages(&ws)?;
+    if pkgs.is_empty() {
+        println!("No tagentacle packages found in {}", ws.display());
+        return Ok(());
+    }
+
+    println!("Found {} package(s):\n", pkgs.len());
+    for (name, path) in &pkgs {
+        println!("  • {} ({})", name, path.display());
+    }
+    println!();
+
+    // Run uv sync in each package that has pyproject.toml
+    for (name, path) in &pkgs {
+        let pyproject = path.join("pyproject.toml");
+        if pyproject.exists() {
+            run_setup_dep(path.to_string_lossy().to_string()).await?;
+        } else {
+            println!("[{}] ⚠ Skipped — no pyproject.toml (not a uv project).", name);
         }
-        if in_deps_section {
-            if trimmed.starts_with("python") {
-                if let Some(eq_pos) = trimmed.find('=') {
-                    let val = trimmed[eq_pos+1..].trim();
-                    // Parse ["dep1", "dep2"]
-                    let inner = val.trim_matches(|c| c == '[' || c == ']');
-                    for dep in inner.split(',') {
-                        let d = dep.trim().trim_matches('"').trim_matches('\'');
-                        if !d.is_empty() {
-                            python_deps.push(d.to_string());
-                        }
-                    }
+    }
+
+    // Generate the install/ structure
+    println!("\nGenerating install/ workspace structure...");
+    generate_install_structure(&ws, &pkgs)?;
+
+    println!("\n✓ Setup complete!");
+    println!("  Source the environment: source {}/install/setup_env.bash", ws.display());
+
+    Ok(())
+}
+
+/// Find all directories containing tagentacle.toml under a workspace root.
+fn find_all_packages(root: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let mut pkgs = Vec::new();
+    find_packages_recursive(root, &mut pkgs, 0)?;
+    Ok(pkgs)
+}
+
+fn find_packages_recursive(dir: &Path, pkgs: &mut Vec<(String, PathBuf)>, depth: usize) -> Result<()> {
+    if depth > 5 { return Ok(()); } // Limit recursion depth
+
+    let toml_path = dir.join("tagentacle.toml");
+    if toml_path.exists() {
+        let info = parse_pkg_toml(&toml_path)?;
+        let name = info.get("package.name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        pkgs.push((name, dir.to_path_buf()));
+        return Ok(()); // Don't recurse into packages
+    }
+
+    // Skip hidden dirs, .venv, __pycache__, target, node_modules, install
+    if let Some(dirname) = dir.file_name().and_then(|n| n.to_str()) {
+        if dirname.starts_with('.') || dirname == "__pycache__"
+            || dirname == "target" || dirname == "node_modules"
+            || dirname == "install" {
+            return Ok(());
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                find_packages_recursive(&entry.path(), pkgs, depth + 1)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Generate the install/ workspace structure:
+///   install/src/<pkg_name>/.venv → symlink to actual pkg's .venv
+///   install/setup_env.bash → sourceable env script
+fn generate_install_structure(ws_root: &Path, pkgs: &[(String, PathBuf)]) -> Result<()> {
+    let install_dir = ws_root.join("install");
+    let install_src = install_dir.join("src");
+
+    // Create install/src/ directory
+    std::fs::create_dir_all(&install_src)
+        .context("Failed to create install/src/ directory")?;
+
+    let mut activated_paths: Vec<(String, PathBuf)> = Vec::new();
+
+    for (name, pkg_path) in pkgs {
+        let venv_dir = pkg_path.join(".venv");
+        let install_pkg_dir = install_src.join(name);
+
+        // Create install/src/<pkg_name>/
+        std::fs::create_dir_all(&install_pkg_dir)?;
+
+        // Create or update symlink: install/src/<pkg_name>/.venv → <pkg_path>/.venv
+        let symlink_path = install_pkg_dir.join(".venv");
+        if symlink_path.exists() || symlink_path.symlink_metadata().is_ok() {
+            std::fs::remove_file(&symlink_path).ok();
+        }
+
+        if venv_dir.exists() {
+            std::os::unix::fs::symlink(&venv_dir, &symlink_path)
+                .with_context(|| format!("Failed to create symlink for {}", name))?;
+            println!("  {} → {}", symlink_path.display(), venv_dir.display());
+            activated_paths.push((name.clone(), venv_dir));
+        } else {
+            println!("  {} — .venv not found (run uv sync first)", name);
+        }
+    }
+
+    // Generate setup_env.bash
+    let bash_path = install_dir.join("setup_env.bash");
+    let mut script = String::new();
+    script.push_str("#!/usr/bin/env bash\n");
+    script.push_str("# Tagentacle workspace environment setup\n");
+    script.push_str("# Auto-generated by `tagentacle setup dep --all`\n");
+    script.push_str("# Usage: source install/setup_env.bash\n\n");
+    script.push_str("_TAGENTACLE_INSTALL_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n\n");
+
+    for (name, venv_path) in &activated_paths {
+        script.push_str(&format!(
+            "# Package: {}\n\
+             if [ -d \"{}/bin\" ]; then\n\
+             \texport PATH=\"{}/bin:$PATH\"\n\
+             fi\n\n",
+            name,
+            venv_path.display(),
+            venv_path.display(),
+        ));
+    }
+
+    script.push_str("echo \"Tagentacle environment loaded (");
+    script.push_str(&format!("{} packages).\"\n", activated_paths.len()));
+
+    std::fs::write(&bash_path, &script)
+        .context("Failed to write setup_env.bash")?;
+
+    // Add install/ to .gitignore if not already present
+    let gitignore = ws_root.join(".gitignore");
+    let needs_entry = if gitignore.exists() {
+        let content = std::fs::read_to_string(&gitignore).unwrap_or_default();
+        !content.lines().any(|l| l.trim() == "install/" || l.trim() == "/install/")
+    } else {
+        true
+    };
+    if needs_entry {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&gitignore)?;
+        use std::io::Write;
+        writeln!(f, "\n# Tagentacle install workspace\ninstall/")?;
+        println!("  Added install/ to .gitignore");
+    }
+
+    println!("  Generated {}", bash_path.display());
+    Ok(())
+}
+
+// --- CLI Tool: setup clean ---
+
+async fn run_setup_clean(workspace_path: String) -> Result<()> {
+    let ws = PathBuf::from(&workspace_path).canonicalize()
+        .with_context(|| format!("Workspace not found: {}", workspace_path))?;
+
+    let install_dir = ws.join("install");
+    if !install_dir.exists() {
+        println!("No install/ directory found in {}. Nothing to clean.", ws.display());
+        return Ok(());
+    }
+
+    println!("Tagentacle Clean — removing install/ structure...");
+
+    // Remove symlinks in install/src/<pkg>/
+    let install_src = install_dir.join("src");
+    if install_src.exists() {
+        if let Ok(entries) = std::fs::read_dir(&install_src) {
+            for entry in entries.flatten() {
+                let venv_link = entry.path().join(".venv");
+                if venv_link.symlink_metadata().is_ok() {
+                    std::fs::remove_file(&venv_link)?;
+                    println!("  Removed symlink: {}", venv_link.display());
                 }
             }
         }
     }
 
-    if python_deps.is_empty() {
-        println!("No Python dependencies found in tagentacle.toml");
-        return Ok(());
-    }
+    // Remove the install/ directory
+    std::fs::remove_dir_all(&install_dir)
+        .context("Failed to remove install/ directory")?;
 
-    println!("Python dependencies: {}", python_deps.join(", "));
-
-    // Run pip install (try python3 -m pip, then python -m pip, then uv pip)
-    let deps_str = python_deps.join(" ");
-    let install_cmd = format!(
-        "python3 -m pip install {} 2>/dev/null || python -m pip install {} 2>/dev/null || uv pip install {}",
-        deps_str, deps_str, deps_str
-    );
-    let mut child = Command::new("sh")
-        .args(["-c", &install_cmd])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .context("Failed to run pip install")?;
-
-    let status = child.wait().await?;
-    if status.success() {
-        println!("✓ Dependencies installed successfully.");
-    } else {
-        eprintln!("✗ pip install failed with status: {}", status);
-    }
-
+    println!("✓ install/ directory removed.");
     Ok(())
 }
