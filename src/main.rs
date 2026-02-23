@@ -588,42 +588,49 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
 
     println!("Running package: {} ({})", pkg_name, pkg_dir.display());
 
-    // Determine the command to run
-    // Detect python executable: prefer python3, fall back to python
-    let python = if std::process::Command::new("python3").arg("--version").output().is_ok() {
-        "python3"
-    } else {
-        "python"
-    };
-
-    let command = if !entry.is_empty() {
-        // entry_points.node = "server:main" -> python3 -c "from server import main; ..."
+    // Build the python command for the entry point
+    let py_command = if !entry.is_empty() {
         let parts: Vec<&str> = entry.split(':').collect();
         if parts.len() == 2 {
-            format!("{} -c \"from {} import {}; import asyncio; asyncio.run({}())\"", python, parts[0], parts[1], parts[1])
+            format!("python -c \"from {} import {}; import asyncio; asyncio.run({}())\"",
+                parts[0], parts[1], parts[1])
         } else {
-            format!("{} {}", python, entry)
+            format!("python {}", entry)
         }
     } else {
         // Fallback: look for common entry files
         if pkg_dir.join("main.py").exists() {
-            format!("{} main.py", python)
+            "python main.py".to_string()
         } else if pkg_dir.join("server.py").exists() {
-            format!("{} server.py", python)
+            "python server.py".to_string()
         } else if pkg_dir.join("client.py").exists() {
-            format!("{} client.py", python)
+            "python client.py".to_string()
         } else {
             anyhow::bail!("No entry point found in {} (set entry_points.node in tagentacle.toml)", pkg_dir.display());
         }
     };
 
-    println!("Command: {}", command);
+    // Check if the package has a .venv (uv project)
+    // If so, source it before running — this uses the pkg's own python
+    let venv_dir = pkg_dir.join(".venv");
+    let shell_command = if venv_dir.join("bin/activate").exists() {
+        println!("  Activating venv: {}", venv_dir.display());
+        format!("source {}/bin/activate && {}", venv_dir.display(), py_command)
+    } else {
+        // No local venv — use system python, warn user
+        println!("  ⚠ No .venv found. Using system Python.");
+        println!("    Hint: cd {} && uv sync", pkg_dir.display());
+        // Fall back to python3 if no venv
+        py_command.replace("python ", "python3 ")
+    };
 
-    // Find SDK path (walk up to find tagentacle-py/)
+    println!("  Command: {}", shell_command);
+
+    // Find SDK path for PYTHONPATH
     let sdk_path = find_sdk_path(&pkg_dir);
 
-    let mut child = Command::new("sh")
-        .args(["-c", &command])
+    let mut child = Command::new("bash")
+        .args(["-c", &shell_command])
         .current_dir(&pkg_dir)
         .env("TAGENTACLE_DAEMON_URL", format!("tcp://{}", addr))
         .env("PYTHONPATH", sdk_path.unwrap_or_default())
@@ -737,8 +744,17 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
 
         println!("[{}] Starting: {} (in {})", node.name, node.command, pkg_dir.display());
 
-        let mut cmd = Command::new("sh");
-        cmd.args(["-c", &node.command])
+        // Source the package's .venv if it exists (per-node isolation)
+        let venv_activate = pkg_dir.join(".venv/bin/activate");
+        let shell_cmd = if venv_activate.exists() {
+            println!("[{}]   venv: {}", node.name, pkg_dir.join(".venv").display());
+            format!("source {} && {}", venv_activate.display(), node.command)
+        } else {
+            node.command.clone()
+        };
+
+        let mut cmd = Command::new("bash");
+        cmd.args(["-c", &shell_cmd])
             .current_dir(&pkg_dir)
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
