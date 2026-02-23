@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Python SDK Dual-Layer API** (`tagentacle-py`):
+  - `LifecycleNode(Node)` with state machine (UNCONFIGURED → INACTIVE → ACTIVE → FINALIZED).
+  - Lifecycle hooks: `on_configure`, `on_activate`, `on_deactivate`, `on_shutdown`.
+  - `bringup()` convenience method for one-call startup.
+  - Improved `Node`: `disconnect()`, `_connected` flag, `call_service()` timeout, error responses on handler failure.
+- **MCP Bus-as-Transport** (`tagentacle-py/tagentacle_py/mcp/`):
+  - `tagentacle_client_transport(node, server_node_id)` — async context manager bridging MCP ClientSession over the bus.
+  - `tagentacle_server_transport(node, server_node_id)` — async context manager exposing MCP Server as a bus service.
+  - Automatic traffic mirroring to `/mcp/traffic` topic.
+  - Backward-compatible class aliases `TagentacleClientTransport` / `TagentacleServerTransport`.
+- **MCP-Publish Bridge Node** (`tagentacle_py/mcp/publish_bridge.py`):
+  - Pre-built MCP Server exposing `publish_to_topic` and `list_available_topics` as MCP Tools.
+  - Topic allow-list support. Standalone `main()` entrypoint.
+- **`tagentacle.toml` Package Manifest** (specification + examples):
+  - Defined `[package]` (name, version, type, description, entry_point) and `[dependencies]` sections.
+  - Created example manifests for `agent_pkg`, `mcp_server_pkg`, `bringup_pkg`.
+- **Bringup Configuration Center** (`examples/bringup_pkg/launch/`):
+  - `system_launch.toml` — TOML-based topology definition with `depends_on`, `startup_delay`, parameters.
+  - `system_launch.py` — config-driven launcher using `tomllib`, topological ordering, env var injection.
+- **CLI Tools Expansion** (Rust Daemon):
+  - `tagentacle topic echo <topic>` — subscribe and print messages from a topic.
+  - `tagentacle service call <service> <payload>` — call a service and print the response.
+  - `tagentacle doctor` — check daemon connectivity.
+- **Examples**:
+  - `mcp_server_pkg/server.py` — MCP weather server over bus transport.
+  - Updated `agent_pkg/client.py` — MCP client using `tagentacle_client_transport`.
+  - `mcp_seamless_demo.py` — end-to-end MCP-over-bus pipeline demo.
+
+### Fixed
+- **Cargo.toml**: Added missing `clap` (with `derive` feature) and `uuid` (with `v4` feature) dependencies.
+
 ### Changed
 - **Documentation Overhaul (NEW_ARCHITECTURE alignment)**:
   - Rewrote [README.md](README.md) (EN) and [README_CN.md](README_CN.md) (CN) to reflect the new architecture:
