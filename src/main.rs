@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -232,8 +232,8 @@ async fn main() -> Result<()> {
             }
         },
         None => {
-            // Default to daemon for backward compatibility
-            run_daemon("127.0.0.1:19999".to_string()).await?;
+            Cli::command().print_help()?;
+            println!();
         }
     }
 
