@@ -453,20 +453,20 @@ cargo uninstall tagentacle
 
 ### 快速上手
 
-以下命令均在**工作空间根目录**（包含 `tagentacle/` 和 `tagentacle-py/` 的目录）下运行：
+安装完成后，以下命令均在**工作空间目录**（如 `tagentacle-py/example_ws/`）下运行：
 
-1. **启动守护进程**：
+1. **启动守护进程**（在另一个终端中）：
    ```bash
    tagentacle daemon
-   # 或如未安装：cd tagentacle && cargo run -- daemon
    ```
 
-2. **初始化工作空间** (uv)：
+2. **初始化工作空间**（安装所有包的依赖）：
    ```bash
+   cd tagentacle-py/example_ws
    tagentacle setup dep --all .
    ```
 
 3. **运行节点**：
    ```bash
-   tagentacle run --pkg tagentacle-py/example_ws/src/mcp_server_pkg
+   tagentacle run --pkg src/mcp_server_pkg
    ```

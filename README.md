@@ -452,20 +452,20 @@ cargo uninstall tagentacle
 
 ### Quick Start
 
-All commands below are run from the **workspace root** (the directory containing both `tagentacle/` and `tagentacle-py/`):
+After installation, all commands below are run from a **workspace directory** (e.g., `tagentacle-py/example_ws/`):
 
-1. **Start the Daemon**:
+1. **Start the Daemon** (in a separate terminal):
    ```bash
    tagentacle daemon
-   # Or, if not installed: cd tagentacle && cargo run -- daemon
    ```
 
-2. **Set up the workspace** (uv):
+2. **Set up the workspace** (install all package dependencies):
    ```bash
+   cd tagentacle-py/example_ws
    tagentacle setup dep --all .
    ```
 
-3. **Run a Node** (Python SDK):
+3. **Run a Node**:
    ```bash
-   tagentacle run --pkg tagentacle-py/example_ws/src/mcp_server_pkg
+   tagentacle run --pkg src/mcp_server_pkg
    ```
