@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`find_sdk_path()`**: Updated to search for `python-sdk-core/` and `python-sdk-mcp/` directories (new 1-repo-1-pkg layout), joining both into `PYTHONPATH`. Removed legacy `tagentacle-py/` fallback.
+
 ### Added
 - **CLI Tools Expansion**:
   - `tagentacle topic echo <topic>` — subscribe and print messages from a topic.
