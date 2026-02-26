@@ -403,20 +403,31 @@ tagentacle setup clean --workspace .
 
 ## 📝 Roadmap & Status
 
+### Dependency Resolution Capabilities
+
+| Source Type | Status | Description |
+| :--- | :---: | :--- |
+| **Git Repos** | ✅ | `[workspace.repos]` in `tagentacle.toml` — auto-clone missing repos on `setup dep --all` |
+| **Python (uv)** | ✅ | Per-package `uv sync` with `.venv` isolation |
+| **apt packages** | ❌ | Planned — system-level dependencies |
+| **npm packages** | ❌ | Planned — Node.js tool and MCP server dependencies |
+| **Build commands** | ❌ | Planned — custom build steps (e.g., `cargo build`, `make`) |
+
 ### Completed
 - [x] **Rust Daemon**: Topic Pub/Sub and Service Req/Res message routing.
 - [x] **Python SDK (Simple API)**: `Node` class with `connect`, `publish`, `subscribe`, `service`, `call_service`, `spin`.
 - [x] **Python SDK Dual-Layer API**: `LifecycleNode` with `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`.
 - [x] **MCP Bridge (Rust)**: `tagentacle bridge --mcp` command tunneling stdio MCP servers through the bus.
 - [x] **MCP Transport Layer**: `TagentacleClientTransport` and `TagentacleServerTransport` in `tagentacle-py`.
-- [x] **Tagentacle MCP Server**: Built-in MCP Server exposing bus interaction tools (`publish_to_topic`, `subscribe_topic`, `list_nodes`, `list_topics`, `list_services`, `call_bus_service`, `ping_daemon`, `describe_topic_schema`).
+- [x] **Tagentacle MCP Server**: Built-in MCP Server exposing bus interaction tools (FastMCP-based, auto-schema from type hints).
 - [x] **`tagentacle.toml` Spec**: Define and parse package manifest format.
 - [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
 - [x] **CLI Toolchain**: `daemon`, `run`, `launch`, `topic echo`, `service call`, `doctor`, `bridge`, `setup dep`, `setup clean`.
 - [x] **Environment Management**: uv-based per-package `.venv` isolation, workspace `install/` structure with symlinks.
 - [x] **Secrets Management**: `secrets.toml` auto-loading, bringup environment variable injection.
 - [x] **SDK Utilities**: `load_pkg_toml`, `discover_packages`, `find_workspace_root`.
-- [x] **Example Workspace**: `examples/src/` with agent_pkg, mcp_server_pkg, bringup_pkg as independent uv projects.
+- [x] **Workspace Repo Auto-Clone**: `[workspace.repos]` in bringup `tagentacle.toml` — `setup dep --all` auto-clones missing git repos.
+- [x] **Example Packages**: `example-agent`, `example-mcp-server`, `example-bringup` as independent repos.
 
 ### Planned
 - [ ] **Standard Topics & Services**: Daemon built-in `/tagentacle/log`, `/tagentacle/node_events`, `/tagentacle/diagnostics`, `/tagentacle/ping`, `/tagentacle/list_nodes`, etc.
@@ -427,7 +438,6 @@ tagentacle setup clean --workspace .
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
 - [ ] **Parameter Server**: Global parameter store with `/tagentacle/parameter_events` notifications.
-- [ ] **vcstool + `.repos`**: Multi-repo one-click workspace pull and build.
 - [ ] **Web Dashboard**: Real-time topology, message flow, and node status visualizer.
 
 ---
@@ -452,20 +462,26 @@ cargo uninstall tagentacle
 
 ### Quick Start
 
-After installation, all commands below are run from a **workspace directory** (e.g., `tagentacle-py/example_ws/`):
+The recommended workflow is to clone a **bringup package** and let the CLI handle everything:
 
-1. **Start the Daemon** (in a separate terminal):
+1. **Clone the bringup repo** into a workspace directory:
+   ```bash
+   mkdir my_workspace && cd my_workspace
+   git clone https://github.com/Tagentacle/example-bringup.git
+   ```
+
+2. **Set up workspace dependencies** (auto-clones repos & installs Python deps):
+   ```bash
+   tagentacle setup dep --all .
+   ```
+   This reads `[workspace.repos]` from `example-bringup/tagentacle.toml`, clones missing repos (e.g., `example-agent`, `example-mcp-server`), then runs `uv sync` in each package.
+
+3. **Start the Daemon** (in a separate terminal):
    ```bash
    tagentacle daemon
    ```
 
-2. **Set up the workspace** (install all package dependencies):
+4. **Launch the system**:
    ```bash
-   cd tagentacle-py/example_ws
-   tagentacle setup dep --all .
-   ```
-
-3. **Run a Node**:
-   ```bash
-   tagentacle run --pkg src/mcp_server_pkg
+   tagentacle launch --config example-bringup/launch/system_launch.toml
    ```
