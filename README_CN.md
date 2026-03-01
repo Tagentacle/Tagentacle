@@ -161,8 +161,8 @@ Bringup Package 不仅是启动脚本，更是系统的"配置中心"：
 ### 通信流
 
 - **Topic (Pub/Sub)**：实时广播、时间线更新、流式输出（如 LLM 打字机效果）。**经 JSON Schema 校验。**
-- **Service (Req/Res)**：快速工具调用（MCP Tool 执行）。
-- **MCP 隧道**："双轨"机制——MCP JSON-RPC 通过 Tagentacle Service 隧道传输以保障可靠性，同时镜像到 Topic 实现透明观测。
+- **Service (Req/Res)**：节点间 RPC 调用（如 Agent 调用 Inference Node 获取 completion）。
+- **MCP (Streamable HTTP)**：Agent 通过原生 MCP SDK HTTP Client 直连 MCP Server，工具调用不经过总线。总线仅承担服务发现（`/mcp/directory` Topic）。
 - **Action (计划中)**：长程异步任务，支持进度反馈。
 
 ---
@@ -228,21 +228,21 @@ SDK 内置两个关键节点：
 *   **完整协议支持**：因 MCP 会话直接在 Agent ↔ Server 之间建立，所有 MCP 功能（sampling、notifications、resources 等）原生可用。
 *   **MCP Gateway**：独立 `mcp-gateway` 包提供传输层 stdio→HTTP 中继，不解析 MCP 语义。
 
-### 无感 SDK 接入
+### Agent 侧连接示例
 ```python
 from mcp import ClientSession
-from tagentacle_py.mcp import TagentacleClientTransport
+from mcp.client.streamable_http import streamable_http_client
 
-# 像连 stdio 一样通过总线连接
-transport = TagentacleClientTransport(node, server_node_id="sqlite_server")
-async with ClientSession(transport) as session:
-    await session.initialize()
-    result = await session.call_tool("query", {"sql": "SELECT * FROM users"})
+# 通过 Streamable HTTP 直连 MCP Server
+async with streamable_http_client("http://127.0.0.1:8100/mcp") as (r, w, _):
+    async with ClientSession(r, w) as session:
+        await session.initialize()
+        result = await session.call_tool("query", {"sql": "SELECT * FROM users"})
 ```
 
 ### 双向调用与可观测性
-- **双向调用**：支持完整 MCP 规范，包括 **Sampling**（Server 反向调用 Agent）。Agent 节点同样注册 `/rpc` 服务以接收回调。
-- **透明观测**：所有隧道流量自动镜像到 `/mcp/traffic` 话题，任何节点（如 Logger）都可以旁路审计工具调用流。
+- **双向调用**：因 MCP 会话直接在 Agent ↔ Server 之间建立（HTTP 长连接），完整支持 MCP 规范中的 **Sampling**（Server 反向调用 Agent）等双向能力。
+- **透明观测**：MCP Server 的服务发现信息发布到 `/mcp/directory` Topic，任何节点可订阅获取系统中所有可用工具的实时视图。
 
 ---
 
@@ -324,7 +324,7 @@ Agent Node 是一个独立 Pkg，在内部完成整个 agentic loop：
 - 订阅 Topic → 接收用户消息/事件通知
 - 管理 context window（消息队列、上下文工程）
 - 通过 Service RPC 调用 Inference Node 获取 completion
-- 解析 `tool_calls` → 通过 MCP Transport 执行工具 → 回填结果 → 再推理
+- 解析 `tool_calls` → 通过 MCP Session（Streamable HTTP 直连）执行工具 → 回填结果 → 再推理
 
 这个 loop 是一个紧耦合的顺序控制流（类似 ROS 2 的 nav2 导航栈），**不应**被拆分到多个 Node 中。
 
@@ -343,8 +343,8 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
                                         │                                           │
                                         │◀── completion (with tool_calls) ◀─────────┘
                                         │
-                                        ├─ MCP Transport ──▶ Tool Server Node
-                                        │◀── tool result ◀──┘
+                                        ├─ MCP Session (HTTP) ──▶ Tool Server Node
+                                        │◀── tool result ◀────────┘
                                         │
                                         └─ publish ──▶ /chat/output ──▶ UI Node
 ```

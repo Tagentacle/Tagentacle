@@ -121,7 +121,7 @@ The system consists of three main pillars:
 
 1.  **`tagentacle` (Rust)**: High-performance message router (Daemon/Broker) and CLI tools.
 2.  **`tagentacle-py` (Python)**: Official Python SDK (similar to ROS's `rclpy`), providing a dual-layer async API.
-3.  **`tagentacle-ecosystem` (Planned)**: A collection of standard Pkgs (e.g., `chatbot_ui_pkg`, `mcp_sqlite_wrapper_pkg`).
+3.  **`tagentacle-ecosystem` (Growing)**: Official example Pkg collection, including a complete chatbot system (`example-agent`, `example-inference`, `example-memory`, `example-frontend`, `example-mcp-server`, `example-bringup`).
 
 ### 🧩 The ROS 2 Analogy
 
@@ -160,8 +160,8 @@ The Bringup Package serves as the system's "configuration center":
 
 ### Communication Flow
 - **Topic (Pub/Sub)**: Real-time broadcasts, timeline updates, and streaming output (e.g., LLM response streams). **Validated against JSON Schema.**
-- **Service (Req/Res)**: Fast tool calling (e.g., MCP tool execution).
-- **MCP Tunneling**: "Double-Track" mechanism—MCP JSON-RPC tunneled through Tagentacle Services for reliability, mirrored to Topics for observability.
+- **Service (Req/Res)**: Inter-node RPC calls (e.g., Agent calling Inference Node for completion).
+- **MCP (Streamable HTTP)**: Agents connect directly to MCP Servers via native MCP SDK HTTP client; tool calls bypass the bus. The bus only handles service discovery (`/mcp/directory` Topic).
 - **Action (Planned)**: Long-running asynchronous tasks with progress feedback.
 
 ---
@@ -209,8 +209,10 @@ class AliceAgent(LifecycleNode):
         self.logger.info("Alice shutting down gracefully.")
 ```
 
-### Built-in Node: TagentacleMCPServer
-The SDK includes a built-in **MCP Server Node** that exposes all bus interactions as standard MCP Tools (publish, subscribe, call_service, introspection). It inherits `MCPServerNode` and runs its own Streamable HTTP endpoint.
+### Built-in Nodes: TagentacleMCPServer & MCPGatewayNode
+The SDK includes two key built-in nodes:
+*   **TagentacleMCPServer**: Exposes the bus's `publish`, `subscribe`, `call_service` and other capabilities as standard MCP Tools. Inherits `MCPServerNode` and runs its own Streamable HTTP endpoint.
+*   **MCPGatewayNode**: Transport-level relay — adapts stdio-only legacy MCP Servers to Streamable HTTP, and publishes remote server URLs to `/mcp/directory`.
 
 ---
 
@@ -225,21 +227,21 @@ Inspired by ROS 2's TF2 pattern, Tagentacle localizes MCP session management wit
 *   **Full Protocol Support**: Direct Agent↔Server sessions preserve all MCP capabilities including sampling, notifications, and resources.
 *   **MCP Gateway**: A separate `mcp-gateway` package provides transport-level stdio→HTTP relay for legacy MCP servers, without parsing MCP semantics.
 
-### Seamless SDK Integration
+### Agent-Side Connection Example
 ```python
 from mcp import ClientSession
-from tagentacle_py.mcp import TagentacleClientTransport
+from mcp.client.streamable_http import streamable_http_client
 
-# Connect through Tagentacle bus instead of stdio
-transport = TagentacleClientTransport(node, server_node_id="sqlite_server")
-async with ClientSession(transport) as session:
-    await session.initialize()
-    result = await session.call_tool("query", {"sql": "SELECT * FROM users"})
+# Connect directly to MCP Server via Streamable HTTP
+async with streamable_http_client("http://127.0.0.1:8100/mcp") as (r, w, _):
+    async with ClientSession(r, w) as session:
+        await session.initialize()
+        result = await session.call_tool("query", {"sql": "SELECT * FROM users"})
 ```
 
 ### Bidirectional & Observability
-- **Bidirectional**: Full MCP spec support including **Sampling** (Server calling Agent). Agent nodes also register `/rpc` services for callbacks.
-- **Observability**: All tunneled traffic auto-mirrored to `/mcp/traffic` Topic. Any node (e.g., Logger) can audit tool-calling flow without intrusive proxies.
+- **Bidirectional**: Because MCP sessions are established directly between Agent ↔ Server (HTTP long-lived connections), full MCP spec bidirectional capabilities are natively supported, including **Sampling** (Server calling back to Agent).
+- **Observability**: MCP Server discovery info is published to the `/mcp/directory` Topic. Any node can subscribe to get a real-time view of all available tools in the system.
 
 ---
 
@@ -321,7 +323,7 @@ An Agent Node is a single Pkg that owns the entire agentic loop internally:
 - Subscribe to Topics → receive user messages / events
 - Manage the context window (message queue, context engineering)
 - Call Inference Node's Service for LLM completion
-- Parse `tool_calls` → execute tools via MCP Transport → backfill results → re-infer
+- Parse `tool_calls` → execute tools via MCP Session (Streamable HTTP direct connection) → backfill results → re-infer
 
 This loop is a tightly-coupled sequential control flow (like ROS 2's nav2 stack) and should **not** be split across multiple Nodes.
 
@@ -340,8 +342,8 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
                                         │                                           │
                                         │◀── completion (with tool_calls) ◀─────────┘
                                         │
-                                        ├─ MCP Transport ──▶ Tool Server Node
-                                        │◀── tool result ◀──┘
+                                        ├─ MCP Session (HTTP) ──▶ Tool Server Node
+                                        │◀── tool result ◀────────┘
                                         │
                                         └─ publish ──▶ /chat/output ──▶ UI Node
 ```
