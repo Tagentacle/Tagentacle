@@ -350,7 +350,7 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## � Container-Ready Architecture
+## 🐳 Container-Ready Architecture
 
 Tagentacle's "Everything is a Pkg" philosophy makes it **naturally container-friendly**. Each package is an independent process with its own dependencies — a perfect fit for one-container-per-package deployment.
 
@@ -399,7 +399,7 @@ All higher-level abstractions — `Node`, `LifecycleNode`, `MCPServerNode`, TACL
 
 ---
 
-## �📜 Communication Protocol
+## 📜 Communication Protocol
 
 The Tagentacle Daemon listens on `TCP 19999` by default. All communication uses newline-delimited JSON (JSON Lines).
 

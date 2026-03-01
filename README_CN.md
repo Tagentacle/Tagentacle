@@ -351,7 +351,7 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## � 天然容器化架构
+## 🐳 天然容器化架构
 
 Tagentacle 的"一切皆 Pkg"哲学使其**天然适配容器化部署**。每个包都是独立进程、拥有独立依赖，完美适配一容器一包的部署模式。
 
@@ -400,7 +400,7 @@ bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
 
 ---
 
-## �📜 通信协议规范
+## 📜 通信协议规范
 
 Tagentacle Daemon 默认监听 `TCP 19999` 端口。所有通信均为换行符分割的 JSON 字符串（JSON Lines）。
 
