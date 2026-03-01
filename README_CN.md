@@ -351,7 +351,56 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## 📜 通信协议规范
+## � 天然容器化架构
+
+Tagentacle 的"一切皆 Pkg"哲学使其**天然适配容器化部署**。每个包都是独立进程、拥有独立依赖，完美适配一容器一包的部署模式。
+
+### 为什么要容器化？
+
+容器化对 **Agent Node** 尤其强大，赋予其前所未有的自由度：
+
+- **Agent 的最大自由度**：每个 Agent 运行在独立容器中，拥有完全隔离的文件系统、网络栈和依赖树。Agent 可以自由 `pip install` 库、写文件、启动子进程，而不影响其他 Agent —— 真正的 AI 节点自治。
+- **操作系统级故障隔离**：失控的 Agent（死循环、内存泄漏、对抗性工具输出）被 cgroup 限制约束。其他服务不受影响。
+- **动态伸缩**：在负载均衡器后面启动多个 Inference Node 或 MCP Server 实例。Agent Node 可在运行时动态增删。
+- **可复现部署**：每个包的 `Dockerfile` + `pyproject.toml` = 从开发笔记本到云集群的字节级一致环境。
+- **安全边界**：处理不可信工具输出或用户输入的 Agent Node 在容器级别被沙箱化 —— 在 TACL JWT 认证之上提供纵深防御。
+
+### 部署演进路径
+
+```
+开发阶段              → docker-compose           → K3s / K8s
+─────────────────      ─────────────────────      ──────────────────
+tagentacle daemon      tagentacle-core 容器       Deployment + Service
+python 进程/包          一容器一包                  HPA 自动伸缩
+localhost:19999        Docker bridge 网络          K8s Service DNS
+bringup.py / launch    docker-compose.yml         Helm Chart
+```
+
+### 近零开销
+
+容器**不是虚拟机** —— 它们通过 Linux namespaces 和 cgroups 共享宿主机内核：
+- **CPU / 内存**：<1% 开销（原生执行，无 hypervisor）
+- **网络**：bridge 模式 2–5% 开销；`host` 网络模式 = 零开销
+- **磁盘 IO**：bind mount 卷 = 原生速度；OverlayFS 写入有约 5% 的写时复制开销
+- **GPU**：通过 NVIDIA Container Toolkit 直通，零开销
+
+对于 Tagentacle 的主要负载（WebSocket 总线消息 + LLM API 调用），容器网络开销（~50μs）相比推理延迟（~200ms+）完全可以忽略。
+
+### 最小化代码改动
+
+SDK 已经天然兼容容器化。唯一需要的改动是通过环境变量注入总线地址：
+
+```python
+import os
+bus_host = os.environ.get("TAGENTACLE_BUS_HOST", "localhost")
+bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
+```
+
+所有上层抽象 —— `Node`、`LifecycleNode`、`MCPServerNode`、TACL 认证、`/mcp/directory` 发现 —— 在容器内的行为与裸跑完全一致。
+
+---
+
+## �📜 通信协议规范
 
 Tagentacle Daemon 默认监听 `TCP 19999` 端口。所有通信均为换行符分割的 JSON 字符串（JSON Lines）。
 

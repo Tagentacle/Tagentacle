@@ -348,7 +348,56 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## 📜 Communication Protocol
+## � Container-Ready Architecture
+
+Tagentacle's "Everything is a Pkg" philosophy makes it **naturally container-friendly**. Each package is an independent process with its own dependencies — a perfect fit for one-container-per-package deployment.
+
+### Why Containerize?
+
+Containerization is especially powerful for **Agent Nodes**, where it provides:
+
+- **Maximum Freedom for Agents**: Each Agent runs in its own container with a fully isolated filesystem, network stack, and dependency tree. An Agent can `pip install` libraries, write files, or spawn subprocesses without affecting other Agents — true autonomy for AI-driven nodes.
+- **Fault Isolation at the OS Level**: A runaway Agent (infinite loop, memory leak, adversarial tool output) is contained by cgroup limits. Other services continue unaffected.
+- **Dynamic Scaling**: Spin up multiple instances of Inference Nodes or MCP Servers behind a load balancer. Agent Nodes can be added/removed at runtime.
+- **Reproducible Deployment**: Each package's `Dockerfile` + `pyproject.toml` = byte-identical environments everywhere, from dev laptops to cloud clusters.
+- **Security Boundaries**: Agent Nodes handling untrusted tool outputs or user inputs are sandboxed at the container level — defense-in-depth beyond TACL's JWT authentication.
+
+### Deployment Progression
+
+```
+Development          → docker-compose           → K3s / K8s
+─────────────────      ─────────────────────      ──────────────────
+tagentacle daemon      tagentacle-core container   Deployment + Service
+python process/pkg     one container per pkg       HPA auto-scaling
+localhost:19999        Docker bridge network        K8s Service DNS
+bringup.py / launch    docker-compose.yml          Helm Chart
+```
+
+### Near-Zero Overhead
+
+Containers are **not VMs** — they share the host kernel via Linux namespaces and cgroups:
+- **CPU / Memory**: <1% overhead (native execution, no hypervisor)
+- **Network**: 2–5% overhead on bridge mode; `host` network mode = zero overhead
+- **Disk I/O**: Bind-mounted volumes = native speed; OverlayFS writes have ~5% copy-on-write cost
+- **GPU**: Zero overhead via NVIDIA Container Toolkit (passthrough)
+
+For Tagentacle's primary workload (WebSocket bus messages + LLM API calls), the container network overhead (~50μs) is negligible compared to inference latency (~200ms+).
+
+### Minimal Code Changes
+
+The SDK is already container-compatible. The only change needed is injecting the bus address via environment variable:
+
+```python
+import os
+bus_host = os.environ.get("TAGENTACLE_BUS_HOST", "localhost")
+bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
+```
+
+All higher-level abstractions — `Node`, `LifecycleNode`, `MCPServerNode`, TACL authentication, `/mcp/directory` discovery — work identically inside containers.
+
+---
+
+## �📜 Communication Protocol
 
 The Tagentacle Daemon listens on `TCP 19999` by default. All communication uses newline-delimited JSON (JSON Lines).
 
