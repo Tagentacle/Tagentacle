@@ -541,7 +541,8 @@ tagentacle setup clean --workspace .
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
 - [ ] **Parameter Server**：全局参数存储，配合 `/tagentacle/parameter_events` 通知。
-- [ ] **容器编排生态包**：Docker/Podman 容器生命周期管理（不在 Daemon 核心中）。
+- [x] **容器编排生态包**：`container-orchestrator` v0.1.0 — LifecycleNode 通过总线服务管理 Docker 容器（`/containers/create`、`stop`、`list`、`exec` 等）。
+- [x] **Shell Server 生态包**：`shell-server` v0.1.0 — MCPServerNode 暴露 `exec_command`、`read_file`、`write_file`、`list_dir` 工具，针对容器执行。
 - [ ] **Web Dashboard**：实时拓扑、消息流和节点状态可视化。
 
 ---

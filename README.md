@@ -551,7 +551,8 @@ tagentacle setup clean --workspace .
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
 - [ ] **Parameter Server**: Global parameter store with `/tagentacle/parameter_events` notifications.
-- [ ] **Container Orchestration Pkg**: Ecosystem package for Docker/Podman container lifecycle management (not in Daemon core).
+- [x] **Container Orchestration Pkg**: `container-orchestrator` v0.1.0 — LifecycleNode managing Docker containers via bus services (`/containers/create`, `stop`, `list`, `exec`, etc.).
+- [x] **Shell Server Pkg**: `shell-server` v0.1.0 — MCPServerNode exposing `exec_command`, `read_file`, `write_file`, `list_dir` tools targeting containers.
 - [ ] **Web Dashboard**: Real-time topology, message flow, and node status visualizer.
 
 ---

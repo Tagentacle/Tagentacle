@@ -6,6 +6,33 @@ For Python SDK changes see [`python-sdk-core`](https://github.com/Tagentacle/pyt
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-03
+
+### Added
+- **Node Registration & Heartbeat**:
+  - New `Register` action: nodes send `{op: register, node_id}` on connect; daemon responds with `register_ack`.
+  - `NodeEntry` tracks `connected_at`, `registered`, `last_pong` per node.
+  - `Pong` action: nodes reply to daemon heartbeat pings.
+  - Daemon sends heartbeat ping every 30s; nodes unresponsive for 90s are automatically removed.
+- **Node Disconnect Cleanup**:
+  - On connection close, daemon removes all subscriptions, services, and node entries.
+  - Publishes `{event: "disconnected"}` to `/tagentacle/node_events` on disconnect and timeout.
+  - Publishes `{event: "connected"}` to `/tagentacle/node_events` on registration.
+- **System Service Interception** (`/tagentacle/*`):
+  - `/tagentacle/ping` — daemon health check (uptime, version, node/topic/service counts).
+  - `/tagentacle/list_nodes` — list all connected nodes with metadata.
+  - `/tagentacle/list_topics` — list all topics with subscriber details.
+  - `/tagentacle/list_services` — list all registered services with providers.
+  - `/tagentacle/get_node_info` — detailed info for a specific node.
+  - These are daemon-intercepted (like `/proc`), not advertised by any node.
+- **Ecosystem Packages**:
+  - `container-orchestrator` v0.1.0 — LifecycleNode managing Docker containers (`/containers/create`, `stop`, `remove`, `list`, `inspect`, `exec`).
+  - `shell-server` v0.1.0 — MCPServerNode exposing `exec_command`, `read_file`, `write_file`, `list_dir` MCP tools targeting containers.
+
+### Changed
+- **Router struct**: `nodes` HashMap now stores `NodeEntry` (with metadata) instead of bare `mpsc::Sender`.
+- **Documentation**: Added system service asymmetry explanation (daemon interception vs normal advertise_service); updated roadmap in both EN and CN READMEs.
+
 ## [0.3.0] - 2026-03-15
 
 ### Removed
