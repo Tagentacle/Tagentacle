@@ -320,9 +320,15 @@ User-defined Topics should **not** use the above prefixes.
 | `/tagentacle/diagnostics` | ROS `/diagnostics` | Node health reports: heartbeat, uptime, message counters, error counts.  | SDK `Node.spin()` (periodic) |
 | `/mcp/directory` | _(none)_ | MCP server discovery. `MCPServerDescription` messages published by MCP Server Nodes and Gateway on activation. Agents subscribe to auto-discover servers. | MCPServerNode / Gateway |
 
-### Standard Services (Daemon built-in)
+### Standard Services (Daemon-intercepted)
 
-The Daemon registers itself as the `_daemon_` node and provides these introspection Services directly from its internal Router state:
+> **Architectural Note — Intentional Asymmetry**
+>
+> These `/tagentacle/*` Services are **not** published by a real Node via `advertise_service`. Instead, the Daemon **intercepts** `call_service` requests whose name starts with `/tagentacle/` and generates responses directly from its Router's internal state — much like Linux's `/proc` filesystem, which is synthesized by the kernel rather than backed by a real disk.
+>
+> This means `/tagentacle/list_services` will **not** list itself or any other `/tagentacle/*` service — they exist outside the normal service registry. This is by design: the Daemon provides *read-only introspection as a mechanism*, without participating as a regular Node in the bus topology it manages.
+>
+> From a caller's perspective, the API is identical to any other service call — `call_service("/tagentacle/ping", {})` works the same way. The asymmetry is invisible to consumers but fundamental to the architecture.
 
 | Service | Analogy | Description |
 |---|---|---|
@@ -535,14 +541,17 @@ tagentacle setup clean --workspace .
 - [x] **TACL (Tagentacle Access Control Layer)**: `python-sdk-mcp` v0.3.0 — MCP-level JWT authentication with `auth_required` on MCPServerNode, `AuthMCPClient`, `PermissionMCPServerNode` (SQLite agent registry + credential issuer).
 
 ### Planned
-- [ ] **Standard Topics & Services**: Daemon built-in `/tagentacle/log`, `/tagentacle/node_events`, `/tagentacle/diagnostics`, `/tagentacle/ping`, `/tagentacle/list_nodes`, etc.
+- [x] **Standard System Services**: Daemon-intercepted `/tagentacle/ping`, `/tagentacle/list_nodes`, `/tagentacle/list_topics`, `/tagentacle/list_services`, `/tagentacle/get_node_info`.
+- [x] **Node Registration & Heartbeat**: `Register` handshake, periodic ping/pong, automatic stale-node cleanup (90s timeout).
+- [x] **Node Disconnect Cleanup**: Automatic removal of subscriptions, services, and node entries on disconnect, with `/tagentacle/node_events` publishing.
+- [ ] **Standard Topics (SDK-side)**: SDK auto-publish to `/tagentacle/log`, `/tagentacle/diagnostics`.
 - [ ] **SDK Log Integration**: Auto-publish node logs to `/tagentacle/log` via `get_logger()`.
 - [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
 - [ ] **Flattened Topic Tools API**: SDK API to auto-generate flattened MCP tools from Topic JSON Schema definitions (e.g., a registered `/chat/input` schema auto-generates a `publish_chat_input(text, sender)` tool with expanded parameters).
-- [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon via `/tagentacle/diagnostics`.
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
 - [ ] **Parameter Server**: Global parameter store with `/tagentacle/parameter_events` notifications.
+- [ ] **Container Orchestration Pkg**: Ecosystem package for Docker/Podman container lifecycle management (not in Daemon core).
 - [ ] **Web Dashboard**: Real-time topology, message flow, and node status visualizer.
 
 ---

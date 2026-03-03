@@ -321,9 +321,15 @@ async with streamable_http_client("http://127.0.0.1:8100/mcp") as (r, w, _):
 | `/tagentacle/diagnostics` | `/diagnostics` | 节点健康诊断：心跳、运行时长、消息计数、错误计数。 | SDK `Node.spin()`（定时）|
 | `/mcp/directory` | _（无）_ | MCP 服务器发现。`MCPServerDescription` 由 MCP Server Node 和 Gateway 在激活时发布。Agent 订阅后自动发现服务器。 | MCPServerNode / Gateway |
 
-### 标准 Service（Daemon 内置）
+### 标准 Service（Daemon 拦截式）
 
-Daemon 以 `_daemon_` 作为内部节点 ID，直接从 Router 内部状态提供以下内省 Service：
+> **架构说明 —— 有意的不对称性**
+>
+> 这些 `/tagentacle/*` Service **不是**由某个正经 Node 通过 `advertise_service` 发布的。而是由 Daemon **拦截** `call_service` 请求——当 service 名以 `/tagentacle/` 开头时，Daemon 直接从 Router 内部状态生成响应——类似 Linux 的 `/proc` 文件系统由内核合成，而非由真实磁盘支撑。
+>
+> 这意味着 `/tagentacle/list_services` **不会列出自己**或任何其他 `/tagentacle/*` service——它们存在于正常服务注册表之外。这是故意为之：Daemon 以*机制*而非*策略*的方式提供只读内省能力，而不作为普通 Node 参与其所管理的总线拓扑。
+>
+> 从调用者视角看，API 与普通 service 完全一致——`call_service("/tagentacle/ping", {})` 用法相同。这种不对称性对消费者透明，但对架构至关重要。
 
 | Service | ROS 2 对应 | 说明 |
 |---|---|---|
@@ -525,15 +531,17 @@ tagentacle setup clean --workspace .
 - [x] **示例 Workspace**：`examples/src/` 包含 agent_pkg、mcp_server_pkg、bringup_pkg，均为独立 uv 项目。
 
 ### 计划中
-- [ ] **标准 Topic 与 Service**：Daemon 内置 `/tagentacle/log`、`/tagentacle/node_events`、`/tagentacle/diagnostics`、`/tagentacle/ping`、`/tagentacle/list_nodes` 等。
+- [x] **标准系统 Service**：Daemon 拦截式 `/tagentacle/ping`、`/tagentacle/list_nodes`、`/tagentacle/list_topics`、`/tagentacle/list_services`、`/tagentacle/get_node_info`。
+- [x] **节点注册与心跳**：`Register` 握手、周期性 ping/pong、自动清理超时节点（90 秒超时）。
+- [x] **节点断开清理**：断开连接时自动清理订阅、服务和节点条目，并发布 `/tagentacle/node_events`。
+- [ ] **标准 Topic（SDK 侧）**：SDK 自动发布到 `/tagentacle/log`、`/tagentacle/diagnostics`。
 - [ ] **SDK 日志集成**：通过 `get_logger()` 自动发布节点日志到 `/tagentacle/log`。
 - [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
-- [ ] **展平 Topic 工具 API**：SDK 提供 API，根据 Topic JSON Schema 定义自动生成展平参数的 MCP 工具（如注册了 `/chat/input` 的 Schema 后，自动生成 `publish_chat_input(text, sender)` 工具）。
-- [ ] **节点生命周期追踪**：通过 `/tagentacle/diagnostics` 实现 Daemon 侧心跳/存活监控。
+- [ ] **展平 Topic 工具 API**：SDK 提供 API，根据 Topic JSON Schema 定义自动生成展平参数的 MCP 工具。
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
 - [ ] **Parameter Server**：全局参数存储，配合 `/tagentacle/parameter_events` 通知。
-- [ ] **vcstool 兼容**：支持 `.repos` 文件格式，与 ROS 生态工具链互操作。
+- [ ] **容器编排生态包**：Docker/Podman 容器生命周期管理（不在 Daemon 核心中）。
 - [ ] **Web Dashboard**：实时拓扑、消息流和节点状态可视化。
 
 ---

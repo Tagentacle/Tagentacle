@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
@@ -114,6 +115,9 @@ enum SetupAction {
 #[serde(tag = "op")]
 #[serde(rename_all = "snake_case")]
 enum Action {
+    Register {
+        node_id: String,
+    },
     Subscribe {
         topic: String,
         node_id: String,
@@ -144,37 +148,170 @@ enum Action {
         sender: String,
         payload: Value,
     },
+    Pong {
+        node_id: String,
+    },
 }
 
 // --- Daemon Logic ---
+
+/// Metadata for a connected node.
+struct NodeEntry {
+    tx: mpsc::UnboundedSender<Value>,
+    connected_at: String,   // ISO 8601 timestamp
+    registered: bool,       // true if node sent a Register message
+    last_pong: Instant,     // last heartbeat response
+}
 
 struct Router {
     // Topic subscriptions: topic -> Vec<(node_id, tx)>
     subscriptions: HashMap<String, Vec<(String, mpsc::UnboundedSender<Value>)>>,
     // Service registry: service_name -> (node_id, tx)
     services: HashMap<String, (String, mpsc::UnboundedSender<Value>)>,
-    // Node registry: node_id -> tx (used for direct routing of Service Responses and Callbacks)
-    nodes: HashMap<String, mpsc::UnboundedSender<Value>>,
-    // TODO: Global Parameter Server (ROS-like /param/get and /param/set)
-    // parameters: HashMap<String, Value>,
+    // Node registry: node_id -> NodeEntry (extended metadata)
+    nodes: HashMap<String, NodeEntry>,
+    // Daemon start time for uptime calculation
+    started_at: Instant,
 }
 
-// TODO: Built-in Command Tasks for Tagentacle CLI:
-// 1. tagentacle node list: List all connected nodes.
-// 2. tagentacle topic echo <topic>: CLI tool to peek into bus traffic (similar to ros2 topic echo).
-// 3. tagentacle service call <srv> <json_args>: CLI tool to test services.
-// 4. tagentacle doctor: Health check (daemon status, node connectivity).
+impl Router {
+    fn new() -> Self {
+        Self {
+            subscriptions: HashMap::new(),
+            services: HashMap::new(),
+            nodes: HashMap::new(),
+            started_at: Instant::now(),
+        }
+    }
 
-// TODO: Implement Node Lifecycle Tracking (Heartbeats / Liveliness)
-// Tagentacle nodes should be monitored so that if a node crashes, 
-// the bus can cleanup its services and notify subscribers.
+    /// Insert or update a node entry (preserving connected_at if already exists).
+    fn upsert_node(&mut self, node_id: &str, tx: mpsc::UnboundedSender<Value>) {
+        self.nodes
+            .entry(node_id.to_string())
+            .and_modify(|e| {
+                e.tx = tx.clone();
+                e.last_pong = Instant::now();
+            })
+            .or_insert_with(|| NodeEntry {
+                tx,
+                connected_at: chrono_now(),
+                registered: false,
+                last_pong: Instant::now(),
+            });
+    }
 
-// TODO: Built-in 'launch' Command Logic
-// This should parse a launch.yaml file containing:
-// - List of nodes to run
-// - Environment variables (e.g., TAGENTACLE_DAEMON_URL)
-// - Remapping rules (e.g., map /camera/image to /sys/camera/image)
-// - Logging redirection (stdout -> log file/bus topic).
+    /// Remove a node and clean up its subscriptions and services.
+    fn remove_node(&mut self, node_id: &str) {
+        self.nodes.remove(node_id);
+        // Clean subscriptions
+        for subs in self.subscriptions.values_mut() {
+            subs.retain(|(id, _)| id != node_id);
+        }
+        // Remove empty topics
+        self.subscriptions.retain(|_, subs| !subs.is_empty());
+        // Clean services
+        self.services.retain(|_, (id, _)| id != node_id);
+    }
+
+    /// Publish a message to a topic (used for internal node_events publishing).
+    fn publish_internal(&self, topic: &str, sender: &str, payload: Value) {
+        if let Some(subs) = self.subscriptions.get(topic) {
+            let push = json!({"op": "message", "topic": topic, "sender": sender, "payload": payload});
+            for (_, sub_tx) in subs {
+                let _ = sub_tx.send(push.clone());
+            }
+        }
+    }
+
+    // --- Built-in system service handlers (/tagentacle/* interception) ---
+    // These are the Daemon's equivalent of Linux /proc — read-only introspection
+    // of the Router's internal state. They are NOT published via advertise_service;
+    // the Daemon intercepts call_service requests to /tagentacle/* directly.
+    // This is an intentional asymmetry: system services are provided by the
+    // Daemon itself, not by any Node.
+
+    /// Handle a /tagentacle/* system service call.
+    /// Returns Some(response_payload) if handled, None if not a system service.
+    fn handle_system_service(&self, service: &str, payload: &Value) -> Option<Value> {
+        match service {
+            "/tagentacle/ping" => {
+                let uptime = self.started_at.elapsed().as_secs();
+                Some(json!({
+                    "status": "ok",
+                    "uptime_s": uptime,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "node_count": self.nodes.len(),
+                    "topic_count": self.subscriptions.len(),
+                    "service_count": self.services.len()
+                }))
+            }
+            "/tagentacle/list_nodes" => {
+                let nodes: Vec<Value> = self.nodes.iter().map(|(id, entry)| {
+                    json!({
+                        "node_id": id,
+                        "connected_at": entry.connected_at,
+                        "registered": entry.registered
+                    })
+                }).collect();
+                Some(json!({ "nodes": nodes }))
+            }
+            "/tagentacle/list_topics" => {
+                let topics: Vec<Value> = self.subscriptions.iter().map(|(name, subs)| {
+                    let subscriber_ids: Vec<&str> = subs.iter().map(|(id, _)| id.as_str()).collect();
+                    json!({
+                        "name": name,
+                        "subscriber_count": subs.len(),
+                        "subscribers": subscriber_ids
+                    })
+                }).collect();
+                Some(json!({ "topics": topics }))
+            }
+            "/tagentacle/list_services" => {
+                let services: Vec<Value> = self.services.iter().map(|(name, (provider, _))| {
+                    json!({
+                        "name": name,
+                        "provider": provider
+                    })
+                }).collect();
+                Some(json!({ "services": services }))
+            }
+            "/tagentacle/get_node_info" => {
+                let target = payload.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(entry) = self.nodes.get(target) {
+                    let subs: Vec<&str> = self.subscriptions.iter()
+                        .filter(|(_, s)| s.iter().any(|(id, _)| id == target))
+                        .map(|(topic, _)| topic.as_str())
+                        .collect();
+                    let svcs: Vec<&str> = self.services.iter()
+                        .filter(|(_, (id, _))| id == target)
+                        .map(|(name, _)| name.as_str())
+                        .collect();
+                    Some(json!({
+                        "node_id": target,
+                        "connected_at": entry.connected_at,
+                        "registered": entry.registered,
+                        "subscriptions": subs,
+                        "services": svcs
+                    }))
+                } else {
+                    Some(json!({ "error": format!("Node '{}' not found", target) }))
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Simple ISO 8601 timestamp (no external chrono dependency).
+fn chrono_now() -> String {
+    // Use std::time for a rough UTC timestamp
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    // Basic formatting: seconds since epoch (nodes can interpret)
+    format!("{}", secs)
+}
 
 type SharedRouter = Arc<Mutex<Router>>;
 
@@ -231,11 +368,40 @@ async fn run_daemon(addr: String) -> Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     println!("Tagentacle Daemon listening on: {}", addr);
 
-    let router = Arc::new(Mutex::new(Router {
-        subscriptions: HashMap::new(),
-        services: HashMap::new(),
-        nodes: HashMap::new(),
-    }));
+    let router = Arc::new(Mutex::new(Router::new()));
+
+    // Spawn heartbeat task: send ping to all nodes every 30s, clean stale ones
+    let heartbeat_router = Arc::clone(&router);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            let mut r = heartbeat_router.lock().await;
+            let ping_msg = json!({"op": "ping"});
+
+            // Collect stale nodes (no pong for > 90s)
+            let stale: Vec<String> = r.nodes.iter()
+                .filter(|(_, entry)| entry.last_pong.elapsed().as_secs() > 90)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            // Remove stale nodes and publish events
+            for node_id in &stale {
+                println!("Node '{}' timed out (no heartbeat), removing.", node_id);
+                r.remove_node(node_id);
+                r.publish_internal(
+                    "/tagentacle/node_events",
+                    "_daemon_",
+                    json!({"event": "disconnected", "node_id": node_id, "reason": "heartbeat_timeout"}),
+                );
+            }
+
+            // Send ping to remaining nodes
+            for (_, entry) in r.nodes.iter() {
+                let _ = entry.tx.send(ping_msg.clone());
+            }
+        }
+    });
 
     loop {
         let (socket, _) = listener.accept().await?;
@@ -267,10 +433,27 @@ async fn handle_daemon_connection(socket: TcpStream, router: SharedRouter) -> Re
                             }
                         };
                         match action {
+                            Action::Register { node_id } => {
+                                current_node_id = Some(node_id.clone());
+                                let mut r = router.lock().await;
+                                r.upsert_node(&node_id, tx.clone());
+                                if let Some(entry) = r.nodes.get_mut(&node_id) {
+                                    entry.registered = true;
+                                }
+                                println!("Node '{}' registered.", node_id);
+                                // Publish node_events
+                                r.publish_internal(
+                                    "/tagentacle/node_events",
+                                    "_daemon_",
+                                    json!({"event": "connected", "node_id": node_id}),
+                                );
+                                // Send ack back to node
+                                let _ = tx.send(json!({"op": "register_ack", "node_id": node_id, "status": "ok"}));
+                            }
                             Action::Subscribe { topic, node_id } => {
                                 current_node_id = Some(node_id.clone());
                                 let mut r = router.lock().await;
-                                r.nodes.insert(node_id.clone(), tx.clone());
+                                r.upsert_node(&node_id, tx.clone());
                                 r.subscriptions.entry(topic).or_default().push((node_id, tx.clone()));
                             }
                             Action::Publish { topic, sender, payload } => {
@@ -283,20 +466,38 @@ async fn handle_daemon_connection(socket: TcpStream, router: SharedRouter) -> Re
                             Action::AdvertiseService { service, node_id } => {
                                 current_node_id = Some(node_id.clone());
                                 let mut r = router.lock().await;
-                                r.nodes.insert(node_id.clone(), tx.clone());
+                                r.upsert_node(&node_id, tx.clone());
                                 r.services.insert(service, (node_id, tx.clone()));
                             }
                             Action::CallService { service, request_id, payload, caller_id } => {
                                 let mut r = router.lock().await;
-                                r.nodes.insert(caller_id.clone(), tx.clone());
-                                if let Some((_, srv_tx)) = r.services.get(&service) {
+                                r.upsert_node(&caller_id, tx.clone());
+
+                                // Intercept /tagentacle/* system services (Daemon's /proc equivalent)
+                                if service.starts_with("/tagentacle/") {
+                                    if let Some(response_payload) = r.handle_system_service(&service, &payload) {
+                                        let _ = tx.send(json!({
+                                            "op": "service_response",
+                                            "service": service,
+                                            "request_id": request_id,
+                                            "payload": response_payload,
+                                            "caller_id": caller_id
+                                        }));
+                                    }
+                                } else if let Some((_, srv_tx)) = r.services.get(&service) {
                                     let _ = srv_tx.send(json!({"op": "call_service", "service": service, "request_id": request_id, "payload": payload, "caller_id": caller_id}));
                                 }
                             }
                             Action::ServiceResponse { service, request_id, payload, caller_id } => {
                                 let r = router.lock().await;
-                                if let Some(caller_tx) = r.nodes.get(&caller_id) {
-                                    let _ = caller_tx.send(json!({"op": "service_response", "service": service, "request_id": request_id, "payload": payload, "caller_id": caller_id}));
+                                if let Some(entry) = r.nodes.get(&caller_id) {
+                                    let _ = entry.tx.send(json!({"op": "service_response", "service": service, "request_id": request_id, "payload": payload, "caller_id": caller_id}));
+                                }
+                            }
+                            Action::Pong { node_id } => {
+                                let mut r = router.lock().await;
+                                if let Some(entry) = r.nodes.get_mut(&node_id) {
+                                    entry.last_pong = Instant::now();
                                 }
                             }
                             _ => {}
@@ -314,7 +515,17 @@ async fn handle_daemon_connection(socket: TcpStream, router: SharedRouter) -> Re
             }
         }
     }
-    if let Some(node_id) = current_node_id { println!("Node '{}' disconnected", node_id); }
+    // Clean up on disconnect
+    if let Some(ref node_id) = current_node_id {
+        println!("Node '{}' disconnected", node_id);
+        let mut r = router.lock().await;
+        r.remove_node(node_id);
+        r.publish_internal(
+            "/tagentacle/node_events",
+            "_daemon_",
+            json!({"event": "disconnected", "node_id": node_id, "reason": "connection_closed"}),
+        );
+    }
     Ok(())
 }
 
