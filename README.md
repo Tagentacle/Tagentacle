@@ -409,7 +409,91 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## 🐳 Container-Ready Architecture
+## � TACL: Tagentacle Access Control Layer
+
+**TACL** (Tagentacle Access Control Layer) provides MCP-level JWT authentication and authorization. It is implemented entirely in the Python SDK (`python-sdk-mcp`) — the Daemon knows nothing about access control, staying true to the "mechanisms only" principle.
+
+### Architecture
+
+TACL is built around three roles:
+
+| Role | Component | Responsibility |
+|---|---|---|
+| **Issuer** | `PermissionMCPServerNode` | SQLite-backed agent registry. Issues JWT credentials with tool-level grants. |
+| **Verifier** | `MCPServerNode` (with `auth_required=True`) | Validates Bearer JWT on every request. Sets `CallerIdentity` contextvar. |
+| **Carrier** | `AuthMCPClient` | Authenticates with the permission server, obtains JWT, attaches it to all MCP requests. |
+
+### JWT Payload Schema
+
+```json
+{
+    "agent_id": "agent_alpha",
+    "tool_grants": {
+        "shell_server": ["exec_command"],
+        "tao_wallet_server": ["query_balance", "transfer"]
+    },
+    "space": "agent_space_1",
+    "iat": 1740000000,
+    "exp": 1740086400
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `agent_id` | `string` | Unique agent identifier. |
+| `tool_grants` | `{server_id: [tool_names]}` | Per-server tool whitelist. Only listed tools are callable. |
+| `space` | `string?` | **Execution environment binding** — identifies the isolated space (e.g., Docker container) assigned to this agent. |
+| `iat` / `exp` | `int` | Issued-at / expiration timestamps (UNIX epoch). Default TTL: 24h. |
+
+### The `space` Claim: Binding Agents to Containers
+
+The `space` field is the key that connects TACL authentication with container isolation. When an admin registers an agent, they assign a `space`:
+
+```python
+# Admin registers agent with a bound container
+await permission_node.register_agent(
+    agent_id="agent_alpha",
+    raw_token="secret_token",
+    tool_grants={"shell_server": ["exec_command"]},
+    space="agent_space_1"   # ← bound to this container
+)
+```
+
+When the agent authenticates and calls an MCP tool (e.g., `exec_command` on the shell-server), the server reads `CallerIdentity.space` from the JWT and routes the command to the bound container — **no global config, no static mapping**. Each agent's JWT carries its own container binding.
+
+### Authentication Flow
+
+```
+Admin                   PermissionMCPServerNode           MCPServerNode (auth_required)
+  │                              │                                │
+  ├─ register_agent ────────────▶│                                │
+  │  (agent_id, token,           │                                │
+  │   tool_grants, space)        │                                │
+  │                              │                                │
+  │          Agent (AuthMCPClient)                                │
+  │              │               │                                │
+  │              ├─ authenticate ▶│                                │
+  │              │  (raw_token)  │                                │
+  │              │◀── JWT ───────┘                                │
+  │              │                                                │
+  │              ├─────── call_tool (Bearer: JWT) ───────────────▶│
+  │              │                                  verify JWT     │
+  │              │                                  check grants   │
+  │              │                                  set CallerIdentity
+  │              │◀──────────── tool result ─────────────────────┘
+```
+
+### Design Principles
+
+- **Zero external dependencies**: JWT signing/verification uses pure Python stdlib (HS256 via `hmac` + `hashlib`).
+- **Shared secret**: Both issuer and verifiers read `TAGENTACLE_AUTH_SECRET` from environment.
+- **Contextvar-based**: `CallerIdentity` is set per-request via Python `contextvars`, enabling tool handlers to read caller info without parameter threading.
+- **Granularity**: Authorization is at the **tool level** per server — not coarse "all or nothing".
+- **Optional**: Auth is opt-in. `MCPServerNode(auth_required=False)` (default) accepts all callers.
+
+---
+
+## �🐳 Container-Ready Architecture
 
 Tagentacle's "Everything is a Pkg" philosophy makes it **naturally container-friendly**. Each package is an independent process with its own dependencies — a perfect fit for one-container-per-package deployment.
 
@@ -455,6 +539,65 @@ bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
 ```
 
 All higher-level abstractions — `Node`, `LifecycleNode`, `MCPServerNode`, TACL authentication, `/mcp/directory` discovery — work identically inside containers.
+
+### Container Orchestrator: Bus-Level Container Management
+
+The `container-orchestrator` package is a `LifecycleNode` that manages Docker containers via the bus — **not** part of the Daemon core. Like Docker is a userspace program on Linux, this orchestrator is an ecosystem package.
+
+| Bus Service | Description |
+|---|---|
+| `/containers/create` | Create and start a container from an image |
+| `/containers/stop` | Stop a running container |
+| `/containers/remove` | Remove a container |
+| `/containers/list` | List all managed containers |
+| `/containers/inspect` | Get container details |
+| `/containers/exec` | Execute a command inside a container |
+
+```bash
+# Create an agent space
+tagentacle service call /containers/create \
+  '{"image": "ubuntu:22.04", "name": "agent_space_1"}'
+
+# Execute a command inside it
+tagentacle service call /containers/exec \
+  '{"name": "agent_space_1", "command": "ls -la /workspace"}'
+```
+
+Key design decisions:
+- All containers are labeled with `tagentacle.managed=true` for filtering.
+- Auto-injects `TAGENTACLE_DAEMON_URL` env var so containerized nodes can connect back to the bus.
+- Default network mode: `host` (simplest for bus connectivity).
+- No ACL logic — access control is handled by TACL at the MCP layer.
+
+### Shell Server: TACL-Aware Dynamic Routing
+
+The `shell-server` package is an `MCPServerNode` that provides `exec_command` as an MCP tool. It supports three execution modes, resolved per-request:
+
+```
+Container Resolution Order:
+  1. TACL JWT space claim → docker exec into caller's bound container
+  2. Static TARGET_CONTAINER env → single fixed container
+  3. Local subprocess fallback
+```
+
+In production (TACL mode), a single shell-server instance serves **multiple agents simultaneously**, each routed to their own container based on their JWT `space` claim:
+
+```
+Agent Alpha (JWT: space=agent_space_1) ──▶ Shell Server ──▶ docker exec agent_space_1
+Agent Beta  (JWT: space=agent_space_2) ──▶ Shell Server ──▶ docker exec agent_space_2
+Agent Gamma (JWT: no space)            ──▶ Shell Server ──▶ local subprocess
+```
+
+### End-to-End: From Registration to Isolated Execution
+
+```
+1. Admin registers agent:          PermissionNode.register_agent(space="agent_space_1")
+2. Orchestrator creates container: /containers/create → docker run agent_space_1
+3. Agent authenticates:            AuthMCPClient → JWT {agent_id, space: "agent_space_1"}
+4. Agent calls exec_command:       Shell Server reads JWT.space → docker exec agent_space_1
+```
+
+No node trusts another node's self-reported identity. Every tool call goes through JWT verification. The container binding is **cryptographically attested** in the token, not passed as a mutable parameter.
 
 ---
 
@@ -546,13 +689,14 @@ tagentacle setup clean --workspace .
 - [x] **Node Disconnect Cleanup**: Automatic removal of subscriptions, services, and node entries on disconnect, with `/tagentacle/node_events` publishing.
 - [ ] **Standard Topics (SDK-side)**: SDK auto-publish to `/tagentacle/log`, `/tagentacle/diagnostics`.
 - [ ] **SDK Log Integration**: Auto-publish node logs to `/tagentacle/log` via `get_logger()`.
-- [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
+- [x] **JSON Schema Validation**: `python-sdk-core` v0.3.0 — `SchemaRegistry` with auto-discovery from interface packages, configurable per-node (`strict`/`warn`/`off`), integrated into `Node.publish()` and `Node._dispatch()`. Requires optional `jsonschema>=4.0`.
+- [x] **TACL `space` Claim**: `python-sdk-mcp` v0.4.0 — JWT `space` field binding agents to isolated execution environments. Full stack: `CallerIdentity.space`, `sign_credential(space=...)`, `PermissionMCPServerNode.register_agent(space=...)`.
 - [ ] **Flattened Topic Tools API**: SDK API to auto-generate flattened MCP tools from Topic JSON Schema definitions (e.g., a registered `/chat/input` schema auto-generates a `publish_chat_input(text, sender)` tool with expanded parameters).
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
 - [ ] **Parameter Server**: Global parameter store with `/tagentacle/parameter_events` notifications.
 - [x] **Container Orchestration Pkg**: `container-orchestrator` v0.1.0 — LifecycleNode managing Docker containers via bus services (`/containers/create`, `stop`, `list`, `exec`, etc.).
-- [x] **Shell Server Pkg**: `shell-server` v0.1.0 — MCPServerNode exposing `exec_command`, `read_file`, `write_file`, `list_dir` tools targeting containers.
+- [x] **Shell Server Pkg**: `shell-server` v0.1.0 — MCPServerNode exposing `exec_command` tool with TACL `space`-aware dynamic container routing (JWT → container → local fallback).
 - [ ] **Web Dashboard**: Real-time topology, message flow, and node status visualizer.
 
 ---

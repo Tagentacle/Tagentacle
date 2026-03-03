@@ -410,7 +410,91 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## 🐳 天然容器化架构
+## � TACL：Tagentacle 访问控制层
+
+**TACL**（Tagentacle Access Control Layer）提供 MCP 级别的 JWT 认证与授权。它完全实现在 Python SDK（`python-sdk-mcp`）中 —— Daemon 对访问控制一无所知，忠实遵循「只提供机制，不制定策略」的原则。
+
+### 架构
+
+TACL 围绕三个角色构建：
+
+| 角色 | 组件 | 职责 |
+|---|---|---|
+| **签发者** | `PermissionMCPServerNode` | SQLite 支撑的 Agent 注册中心。签发携带工具级授权的 JWT 凭证。 |
+| **验证者** | `MCPServerNode`（`auth_required=True`） | 每次请求验证 Bearer JWT。设置 `CallerIdentity` 上下文变量。 |
+| **携带者** | `AuthMCPClient` | 向权限服务器认证，获取 JWT，附加到所有 MCP 请求。 |
+
+### JWT 负载格式
+
+```json
+{
+    "agent_id": "agent_alpha",
+    "tool_grants": {
+        "shell_server": ["exec_command"],
+        "tao_wallet_server": ["query_balance", "transfer"]
+    },
+    "space": "agent_space_1",
+    "iat": 1740000000,
+    "exp": 1740086400
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `agent_id` | `string` | Agent 唯一标识符。 |
+| `tool_grants` | `{server_id: [tool_names]}` | 按服务器的工具白名单。仅列出的工具可被调用。 |
+| `space` | `string?` | **执行环境绑定** —— 标识分配给此 Agent 的隔离空间（如 Docker 容器名）。 |
+| `iat` / `exp` | `int` | 签发时间 / 过期时间（UNIX 时间戳）。默认有效期：24 小时。 |
+
+### `space` 声明：将 Agent 绑定到容器
+
+`space` 字段是连接 TACL 认证与容器隔离的关键。管理员注册 Agent 时指定 `space`：
+
+```python
+# 管理员注册 Agent 并绑定容器
+await permission_node.register_agent(
+    agent_id="agent_alpha",
+    raw_token="secret_token",
+    tool_grants={"shell_server": ["exec_command"]},
+    space="agent_space_1"   # ← 绑定到此容器
+)
+```
+
+当 Agent 认证后调用 MCP 工具（如 shell-server 的 `exec_command`），服务端从 JWT 中读取 `CallerIdentity.space` 并将命令路由到绑定的容器 —— **无全局配置，无静态映射**。每个 Agent 的 JWT 携带自己的容器绑定信息。
+
+### 认证流程
+
+```
+管理员                  PermissionMCPServerNode           MCPServerNode (auth_required)
+  │                              │                                │
+  ├─ register_agent ────────────▶│                                │
+  │  (agent_id, token,           │                                │
+  │   tool_grants, space)        │                                │
+  │                              │                                │
+  │          Agent (AuthMCPClient)                                │
+  │              │               │                                │
+  │              ├─ authenticate ▶│                                │
+  │              │  (raw_token)  │                                │
+  │              │◀── JWT ───────┘                                │
+  │              │                                                │
+  │              ├─────── call_tool (Bearer: JWT) ───────────────▶│
+  │              │                                  验证 JWT       │
+  │              │                                  检查授权       │
+  │              │                                  设置 CallerIdentity
+  │              │◀──────────── 工具结果 ────────────────────────┘
+```
+
+### 设计原则
+
+- **零外部依赖**：JWT 签名/验证使用纯 Python 标准库（HS256 via `hmac` + `hashlib`）。
+- **共享密钥**：签发者和所有验证者均从环境变量 `TAGENTACLE_AUTH_SECRET` 读取密钥。
+- **基于 Contextvar**：`CallerIdentity` 通过 Python `contextvars` 按请求设置，工具处理函数可直接读取调用者信息，无需参数透传。
+- **细粒度**：授权粒度到每个服务器的**工具级别** —— 非粗粒度的「全有或全无」。
+- **可选启用**：认证默认关闭。`MCPServerNode(auth_required=False)`（默认值）接受所有调用者。
+
+---
+
+## �🐳 天然容器化架构
 
 Tagentacle 的"一切皆 Pkg"哲学使其**天然适配容器化部署**。每个包都是独立进程、拥有独立依赖，完美适配一容器一包的部署模式。
 
@@ -456,6 +540,65 @@ bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
 ```
 
 所有上层抽象 —— `Node`、`LifecycleNode`、`MCPServerNode`、TACL 认证、`/mcp/directory` 发现 —— 在容器内的行为与裸跑完全一致。
+
+### 容器编排器：总线级容器管理
+
+`container-orchestrator` 包是一个 `LifecycleNode`，通过总线管理 Docker 容器 —— **不是** Daemon 核心的一部分。正如 Docker 是 Linux 上的用户态程序（而非内核模块），此编排器是一个生态包。
+
+| 总线服务 | 说明 |
+|---|---|
+| `/containers/create` | 从镜像创建并启动容器 |
+| `/containers/stop` | 停止运行中的容器 |
+| `/containers/remove` | 移除容器 |
+| `/containers/list` | 列出所有受管容器 |
+| `/containers/inspect` | 获取容器详情 |
+| `/containers/exec` | 在容器内执行命令 |
+
+```bash
+# 创建 Agent 空间
+tagentacle service call /containers/create \
+  '{"image": "ubuntu:22.04", "name": "agent_space_1"}'
+
+# 在容器内执行命令
+tagentacle service call /containers/exec \
+  '{"name": "agent_space_1", "command": "ls -la /workspace"}'
+```
+
+核心设计决策：
+- 所有容器标记 `tagentacle.managed=true` 以便筛选。
+- 自动注入 `TAGENTACLE_DAEMON_URL` 环境变量，使容器化节点可连回总线。
+- 默认网络模式：`host`（总线连接最简方案）。
+- 不包含 ACL 逻辑 —— 访问控制由 TACL 在 MCP 层处理。
+
+### Shell Server：TACL 感知的动态路由
+
+`shell-server` 包是一个 `MCPServerNode`，将 `exec_command` 作为 MCP 工具暴露。支持三种执行模式，按请求动态解析：
+
+```
+容器解析优先级：
+  1. TACL JWT space 声明 → docker exec 到调用者绑定的容器
+  2. 静态 TARGET_CONTAINER 环境变量 → 单一固定容器
+  3. 本地 subprocess 兜底
+```
+
+在生产环境（TACL 模式）下，单个 shell-server 实例**同时服务多个 Agent**，每个请求根据 JWT `space` 声明路由到各自的容器：
+
+```
+Agent Alpha (JWT: space=agent_space_1) ──▶ Shell Server ──▶ docker exec agent_space_1
+Agent Beta  (JWT: space=agent_space_2) ──▶ Shell Server ──▶ docker exec agent_space_2
+Agent Gamma (JWT: 无 space)            ──▶ Shell Server ──▶ 本地 subprocess
+```
+
+### 端到端：从注册到隔离执行
+
+```
+1. 管理员注册 Agent：           PermissionNode.register_agent(space="agent_space_1")
+2. 编排器创建容器：             /containers/create → docker run agent_space_1
+3. Agent 认证：                 AuthMCPClient → JWT {agent_id, space: "agent_space_1"}
+4. Agent 执行命令：             Shell Server 读取 JWT.space → docker exec agent_space_1
+```
+
+没有节点信任其他节点的自我声明身份。每次工具调用都经过 JWT 验证。容器绑定关系以**密码学方式证明**于 Token 中，而非作为可篡改的参数传递。
 
 ---
 
@@ -529,6 +672,7 @@ tagentacle setup clean --workspace .
 - [x] **工作空间 Repo 自动克隆**：`tagentacle launch` 读取 `[workspace]` 配置段，启动前自动 `git clone` 所有声明的仓库。
 - [x] **示例聊天机器人系统**：5 节点完整系统（`example-agent`、`example-inference`、`example-memory`、`example-frontend`、`example-mcp-server`），通过 `example-bringup` 一键启动，端到端验证通过。
 - [x] **示例 Workspace**：`examples/src/` 包含 agent_pkg、mcp_server_pkg、bringup_pkg，均为独立 uv 项目。
+- [x] **TACL（Tagentacle 访问控制层）**：`python-sdk-mcp` v0.3.0 — MCP 级别 JWT 认证，含 `auth_required` 开关、`AuthMCPClient`、`PermissionMCPServerNode`（SQLite Agent 注册中心 + 凭证签发）。
 
 ### 计划中
 - [x] **标准系统 Service**：Daemon 拦截式 `/tagentacle/ping`、`/tagentacle/list_nodes`、`/tagentacle/list_topics`、`/tagentacle/list_services`、`/tagentacle/get_node_info`。
@@ -536,13 +680,14 @@ tagentacle setup clean --workspace .
 - [x] **节点断开清理**：断开连接时自动清理订阅、服务和节点条目，并发布 `/tagentacle/node_events`。
 - [ ] **标准 Topic（SDK 侧）**：SDK 自动发布到 `/tagentacle/log`、`/tagentacle/diagnostics`。
 - [ ] **SDK 日志集成**：通过 `get_logger()` 自动发布节点日志到 `/tagentacle/log`。
-- [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
+- [x] **JSON Schema 校验**：python-sdk-core v0.3.0 — `SchemaRegistry` 自动发现 interface 包中的 schema 定义，逐节点配置校验模式（`strict`/`warn`/`off`），集成到 `Node.publish()` 和 `Node._dispatch()`。需可选依赖 `jsonschema>=4.0`。
+- [x] **TACL `space` 声明**：python-sdk-mcp v0.4.0 — JWT `space` 字段将 Agent 绑定到隔离执行环境。完整链路：`CallerIdentity.space`、`sign_credential(space=...)`、`PermissionMCPServerNode.register_agent(space=...)`。
 - [ ] **展平 Topic 工具 API**：SDK 提供 API，根据 Topic JSON Schema 定义自动生成展平参数的 MCP 工具。
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
 - [ ] **Parameter Server**：全局参数存储，配合 `/tagentacle/parameter_events` 通知。
 - [x] **容器编排生态包**：`container-orchestrator` v0.1.0 — LifecycleNode 通过总线服务管理 Docker 容器（`/containers/create`、`stop`、`list`、`exec` 等）。
-- [x] **Shell Server 生态包**：`shell-server` v0.1.0 — MCPServerNode 暴露 `exec_command`、`read_file`、`write_file`、`list_dir` 工具，针对容器执行。
+- [x] **Shell Server 生态包**：`shell-server` v0.1.0 — MCPServerNode 暴露 `exec_command` 工具，支持 TACL `space` 感知的动态容器路由（JWT → 容器 → 本地兜底）。
 - [ ] **Web Dashboard**：实时拓扑、消息流和节点状态可视化。
 
 ---
