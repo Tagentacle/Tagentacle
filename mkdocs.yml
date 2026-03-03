@@ -1,0 +1,93 @@
+site_name: Tagentacle
+site_url: https://tagentacle.github.io
+site_description: "The ROS of AI Agents — Decentralized, Production-Grade Multi-Agent Framework"
+repo_url: https://github.com/Tagentacle/tagentacle
+repo_name: Tagentacle/tagentacle
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+  logo: https://raw.githubusercontent.com/Tagentacle/Tagentacle.github.io/main/css/logo.svg
+  favicon: https://raw.githubusercontent.com/Tagentacle/Tagentacle.github.io/main/css/logo.svg
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh
+          name: 中文
+          build: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Core Concepts:
+    - Philosophy: concepts/philosophy.md
+    - Why Tagentacle: concepts/why-tagentacle.md
+    - Architecture: concepts/architecture.md
+    - Agent Architecture: concepts/agent-architecture.md
+  - Guides:
+    - Python SDK: guides/python-sdk.md
+    - MCP Integration: guides/mcp-integration.md
+    - TACL Authentication: guides/tacl.md
+    - Best Practices: guides/best-practices.md
+    - Containers: guides/containers.md
+  - Reference:
+    - Standard Topics & Services: reference/topics-services.md
+    - Communication Protocol: reference/protocol.md
+    - CLI Tools: reference/cli.md
+  - Roadmap: roadmap.md
