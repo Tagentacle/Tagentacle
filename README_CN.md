@@ -410,7 +410,7 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## � TACL：Tagentacle 访问控制层
+## 🔐 TACL：Tagentacle 访问控制层
 
 **TACL**（Tagentacle Access Control Layer）提供 MCP 级别的 JWT 认证与授权。它完全实现在 Python SDK（`python-sdk-mcp`）中 —— Daemon 对访问控制一无所知，忠实遵循「只提供机制，不制定策略」的原则。
 
@@ -494,7 +494,7 @@ await permission_node.register_agent(
 
 ---
 
-## �🐳 天然容器化架构
+## 🐳 天然容器化架构
 
 Tagentacle 的"一切皆 Pkg"哲学使其**天然适配容器化部署**。每个包都是独立进程、拥有独立依赖，完美适配一容器一包的部署模式。
 
