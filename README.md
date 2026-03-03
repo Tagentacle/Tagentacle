@@ -409,7 +409,7 @@ UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
 
 ---
 
-## � TACL: Tagentacle Access Control Layer
+## 🔐 TACL: Tagentacle Access Control Layer
 
 **TACL** (Tagentacle Access Control Layer) provides MCP-level JWT authentication and authorization. It is implemented entirely in the Python SDK (`python-sdk-mcp`) — the Daemon knows nothing about access control, staying true to the "mechanisms only" principle.
 
@@ -493,7 +493,7 @@ Admin                   PermissionMCPServerNode           MCPServerNode (auth_re
 
 ---
 
-## �🐳 Container-Ready Architecture
+## 🐳 Container-Ready Architecture
 
 Tagentacle's "Everything is a Pkg" philosophy makes it **naturally container-friendly**. Each package is an independent process with its own dependencies — a perfect fit for one-container-per-package deployment.
 
