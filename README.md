@@ -62,7 +62,7 @@ This is the deepest _architectural chasm_ between Tagentacle and Claude Code's p
 | **`.claude.md` / `tagentacle.toml`** | The project's "laws of physics" | Each microservice's identity card |
 | **Plugin / Pkg** | A tool mounted on the project | An independently living software entity |
 | **Sub-Agent / Node** | Main Agent's outsourced helper | A first-class network citizen |
-| **What is AI?** | Guest (serving the codebase) | Host (the operating system managing everything) |
+| **Role of AI** | Protagonist (all capabilities built around AI) | Just another node (Tagentacle is the OS; AI agents are processes running on it) |
 
 #### Topology: Tree vs. Mesh
 

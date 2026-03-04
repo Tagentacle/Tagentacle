@@ -49,3 +49,63 @@ ROS 封装 Linux 而非直接暴露，核心原因是：
 3. **组合性** — 任意两个 ROS 节点只要 topic 类型匹配就能通信，无需双方知道对方存在。Linux IPC 需要显式连接两端。
 
 **AI agent 领域正处于 ROS 之前的状态** —— 每个 agent 框架（LangChain、CrewAI、AutoGen）各自发明通信方式，agent 之间无法互操作。Tagentacle 要做的，正是这个领域的 ROS。
+
+## 为什么不直接用 Agent 框架？
+
+一个更尖锐的问题：openclaw 内置 25+ 工具和 5400+ Skills，Claude Code 有插件市场，Google ADK 支持多 Agent 编排——为什么还需要 Tagentacle？
+
+**因为它们是应用程序，不是操作系统。**
+
+### 超级应用 vs 操作系统
+
+openclaw、Claude Code、ADK 的共同模式是：**把所有能力打包进一个进程**。
+
+```
+openclaw Gateway 进程 {
+    浏览器引擎、搜索工具、cron 调度、记忆系统、
+    25+ 内置工具、插件 A、插件 B……全部 in-process
+}
+
+ADK Runner 进程 {
+    root_agent、sub_agent_1、sub_agent_2……
+    共享一个 Python 字典作为"状态"
+}
+
+Claude Code 进程 {
+    LLM 调用、工具执行、插件加载……全部 in-process
+}
+```
+
+Tagentacle 的做法完全不同：
+
+```
+Daemon（只管总线和生命周期）
+  总线
+    ├── browser-pkg（独立进程）
+    ├── search-pkg（独立进程）
+    ├── memory-pkg（独立进程）
+    ├── agent-pkg（独立进程）
+    └── monitor-pkg（独立进程）
+```
+
+上面是"什么都塞在一个房间里的合租"，下面是"每人一套公寓、共用走廊通信"。差别不在功能多少，而在**隔离的粒度**。
+
+### 直觉测试
+
+> **能不能把 openclaw 作为 Tagentacle 的一个 Pkg 运行？** — 可以。它只是总线上的一个节点。
+>
+> **能不能把 Tagentacle 作为 openclaw 的一个插件运行？** — 不行。操作系统不能被装进应用程序里。
+
+这就是应用程序和操作系统的区别：**操作系统可以运行应用程序，但应用程序不能包含操作系统。**
+
+### 历史上的同构演变
+
+这不是新故事：
+
+| 阶段 | 过去 | AI Agent 领域 |
+| :--- | :--- | :--- |
+| **单体时代** | CGI 把逻辑编译进 Apache | openclaw/ADK 把工具编译进 Gateway |
+| **拆分时代** | 微服务 + API Gateway | Tagentacle Pkg + 总线 |
+| **机器人领域** | 感知/规划/控制写进一个程序 → ROS 拆成节点 + 总线 | Agent/工具/记忆写进一个进程 → Tagentacle 拆成节点 + 总线 |
+
+**AI Agent 领域正处于"所有逻辑烧在一起"的阶段。** openclaw、Claude Code、ADK 是这个阶段的优秀产品。Tagentacle 赌的是下一个阶段。

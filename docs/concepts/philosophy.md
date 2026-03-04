@@ -49,3 +49,65 @@ ROS wrapped Linux rather than exposing it directly because:
 3. **Composability** — any two ROS nodes can communicate as long as their topic types match, without knowing each other exists. Linux IPC requires explicit wiring of both ends.
 
 **The AI agent ecosystem is in a pre-ROS state** — every agent framework (LangChain, CrewAI, AutoGen) invents its own communication model, making agents non-interoperable. Tagentacle aims to be the ROS of this domain.
+
+## Why Not Just Use an Agent Framework?
+
+A sharper question: OpenClaw ships 25+ built-in tools and 5400+ Skills. Claude Code has a plugin marketplace. Google ADK supports multi-agent orchestration. Why would anyone need Tagentacle?
+
+**Because they are applications, not operating systems.**
+
+### Super-App vs. Operating System
+
+OpenClaw, Claude Code, and ADK share a common pattern: **pack every capability into a single process**.
+
+```
+OpenClaw Gateway process {
+    Browser engine, search tool, cron scheduler,
+    memory system, 25+ built-in tools, Plugin A,
+    Plugin B… all in-process
+}
+
+ADK Runner process {
+    root_agent, sub_agent_1, sub_agent_2…
+    sharing a Python dictionary as "state"
+}
+
+Claude Code process {
+    LLM calls, tool execution, plugin loading…
+    all in-process
+}
+```
+
+Tagentacle takes the opposite approach:
+
+```
+Daemon (manages only the bus and lifecycle)
+  Bus
+    ├── browser-pkg   (independent process)
+    ├── search-pkg    (independent process)
+    ├── memory-pkg    (independent process)
+    ├── agent-pkg     (independent process)
+    └── monitor-pkg   (independent process)
+```
+
+The first is "everyone crammed into one room." The second is "everyone in their own apartment, communicating through hallways." The difference isn't in how many features exist — it's in the **granularity of isolation**.
+
+### The Litmus Test
+
+> **Can OpenClaw run as a Tagentacle Pkg?** — Yes. It's just another node on the bus.
+>
+> **Can Tagentacle run as an OpenClaw plugin?** — No. You can't fit an operating system inside an application.
+
+This is the difference between an application and an OS: **an OS can run applications, but an application cannot contain an OS.**
+
+### Historical Parallels
+
+This is not a new story:
+
+| Era | Past | AI Agent Domain |
+| :--- | :--- | :--- |
+| **Monolith** | CGI compiled into Apache | OpenClaw/ADK compile tools into Gateway |
+| **Decomposition** | Microservices + API Gateway | Tagentacle Pkg + Bus |
+| **Robotics** | Perception/planning/control in one binary → ROS split into nodes + bus | Agent/tools/memory in one process → Tagentacle split into nodes + bus |
+
+**The AI agent domain is at the "everything baked into one binary" stage.** OpenClaw, Claude Code, and ADK are excellent products of this stage. Tagentacle bets on the next one.

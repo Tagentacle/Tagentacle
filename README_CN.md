@@ -62,7 +62,7 @@ Tagentacle 继承了 ROS 2 最根本的软件组织哲学：**将系统功能彻
 | **`.claude.md` / `tagentacle.toml`** | 项目的"物理法则" | 每个微服务的身份证 |
 | **Plugin / Pkg** | 挂载在项目上的工具 | 独立存活的软件实体 |
 | **Sub-Agent / Node** | 主 Agent 的外包小弟 | 对等的网络公民 |
-| **AI 是什么** | Guest（服务于代码库的客人） | Host（管理一切的操作系统） |
+| **AI 的角色** | 主角（一切能力围绕 AI 构建） | 节点之一（Tagentacle 是操作系统，AI Agent 只是其上的进程） |
 
 #### 拓扑结构：树 vs 网
 

@@ -39,7 +39,7 @@
 | **`.claude.md` / `tagentacle.toml`** | 项目的"物理法则" | 每个微服务的身份证 |
 | **Plugin / Pkg** | 挂载在项目上的工具 | 独立存活的软件实体 |
 | **Sub-Agent / Node** | 主 Agent 的外包小弟 | 对等的网络公民 |
-| **AI 是什么** | Guest（服务于代码库的客人） | Host（管理一切的操作系统） |
+| **AI 的角色** | 主角（一切能力围绕 AI 构建） | 节点之一（Tagentacle 是操作系统，AI Agent 只是其上的进程） |
 
 ### 拓扑结构：树 vs 网
 
@@ -90,7 +90,73 @@ Tagentacle 是**网状拓扑 (Mesh)**：
 
 Tagentacle 不是另一个 Claude Code，**它是管理无数个 "Claude 级别智能体" 的基础设施**。
 
-## 5. 为什么不直接用 Linux？
+## 5. 插件陷阱：进程内扩展 vs 操作系统级组合
+
+上述差异不仅是架构审美，它在现实中已经产生了可观测的**工程代价**。
+
+### 范畴混淆：一个 register 函数做七件事
+
+以 openclaw 的插件系统为例。一个 `(api) => { ... }` 函数可以同时注册：
+
+- Gateway RPC 方法（IPC/网络层）
+- Gateway HTTP 处理器（Web 服务器）
+- Agent 工具（AI 能力扩展）
+- CLI 命令（用户界面）
+- 后台服务（守护进程）
+- 消息渠道适配器（通信协议）
+- Provider 认证流程（身份认证）
+- Skills（知识/提示词）
+
+这八样东西有**完全不同的生命周期、部署需求和安全边界**，但被塞进了同一个抽象、跑在同一个进程里。
+
+### 为了弥补这个设计，需要多少补丁？
+
+| 因为 in-process…… | 所以需要…… | Tagentacle 为什么不需要 |
+| :--- | :--- | :--- |
+| 没有进程隔离 | allowlist / denylist 手动信任控制 | 每个 Pkg 是独立进程/容器，天然沙箱 |
+| 没有文件系统隔离 | symlink 逃逸检查、文件权限检查、所有权验证 | 容器文件系统隔离 |
+| 同类插件冲突 | slot 互斥机制（"同一时间只能有一个 memory 插件"） | 独立进程，不需要互斥 |
+| 没有服务注册 | 7 层路径扫描（配置路径 → 工作空间 → 全局目录 → 捆绑扩展 → NPM → catalog JSON → 环境变量） | 总线自动注册与发现 |
+| 所有渠道共享 SDK | 40+ 个 SDK 子路径（`plugin-sdk/telegram`、`plugin-sdk/discord`、`plugin-sdk/slack` ……） | 各 Pkg 只依赖总线协议，无共享 SDK |
+| 一个插件崩溃 | 整个 Gateway 崩溃 | 只有该 Pkg 重启 |
+
+每一条补丁都是**因为所有东西跑在一个进程里而被迫添加的**。
+
+### ADK 的"多 Agent"：同一个字典的不同读者
+
+Google ADK 提供了 Sequential、Parallel、Loop 三种多 Agent 编排模式，看起来很强大。但实际运行时：
+
+```python
+# 所有 "Agent" 跑在同一个 Python 进程
+# 通过共享字典传递数据
+runner = Runner(agent=root_agent)  # 一个进程
+state["research_result"] = "..."   # 一个字典
+```
+
+所有 Agent 共享一个进程、一个 Runner、一块内存。所谓多 Agent，不过是同一个程序里的不同函数，通过一个 Python 字典传数据。
+
+| | ADK"多 Agent" | Tagentacle 多节点 |
+| :--- | :--- | :--- |
+| **隔离级别** | 函数级（同进程） | 进程/容器级 |
+| **通信方式** | 共享内存字典 | 总线消息 |
+| **故障隔离** | 无 | 有 |
+| **跨机器** | 不行 | 可以 |
+| **混合语言** | 不行（全 Python） | 可以 |
+| **独立部署/升级** | 不行 | 可以 |
+
+> Google 自己也意识到了进程内编排的局限——它同时推出了 [A2A 协议](https://google.github.io/A2A/)，定义跨进程、跨框架的 Agent 通信标准。A2A 要解决的问题，和 Tagentacle 总线要解决的问题，是同一个。但 Tagentacle 还多了一层：**谁来启动 Agent、谁来重启、谁来升级、谁来监控**——生命周期管理。
+
+### 不是架构审美，是工程现实
+
+| 操作 | 超级应用（openclaw/CC/ADK） | 操作系统（Tagentacle） |
+| :--- | :--- | :--- |
+| 升级搜索工具 | 市场安装/更新，但需重启整个 Gateway（共享进程命运） | 只重启该 Pkg，其余节点零影响 |
+| 两个 Agent 共享浏览器 | 做不到（浏览器在进程内部） | 浏览器是独立 Pkg，谁都能连 |
+| 在 ARM 设备上只运行消息转发 | 装整个 openclaw | 只装需要的 Pkg |
+| 工具混合多种语言 | 不行（框架锁定 TypeScript 或 Python） | 每个 Pkg 任意语言，只需实现总线协议 |
+| 审计全部工具调用 | 各框架各有日志方案，无统一观测面 | 监控 Pkg 订阅总线，天然全局视图 |
+
+## 6. 为什么不直接用 Linux？
 
 参见[核心哲学 → 为什么不直接用 Linux？](philosophy.md#为什么不直接用-linux)，了解 Tagentacle 如何作为 Linux 之上的领域 Shell 而非替代品。
 

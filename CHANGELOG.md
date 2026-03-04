@@ -6,6 +6,14 @@ For Python SDK changes see [`python-sdk-core`](https://github.com/Tagentacle/pyt
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Docs: "Why Not Just Use an Agent Framework?"** — new section in `philosophy.md/.zh.md` comparing Tagentacle's OS-level approach against super-app frameworks (OpenClaw, Claude Code, ADK), with litmus test and historical parallels.
+- **Docs: "The Plugin Trap"** — new section 5 in `why-tagentacle.md/.zh.md` analyzing in-process plugin systems (category confusion, patch accumulation, ADK shared-dict multi-agent) vs OS-level composition.
+- **Fix: "Role of AI" row** — corrected worldview table across READMEs and docs: Tagentacle is the OS, AI agents are processes running on it (not "Host managing everything").
+- **Fix: engineering comparison table** — removed inaccurate claim that OC/CC require forking to upgrade plugins; accurately describes shared-process-fate restart cost instead.
+
 ## [0.4.0] - 2026-03-03
 
 ### Added
