@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`tagentacle test` subcommand**: Run tests for one or all workspace packages.
+  - `--pkg <path>`: test a single package.
+  - `--all <src_dir>`: scan workspace `src/` and test every package that has a `tests/` directory.
+  - Auto-starts daemon if not already running; auto-stops on completion.
+  - Smart daemon detection: reuses existing daemon (e.g. started by user or another process).
+  - Forwards extra pytest args via `-- <args>` (shell-quotes arguments containing spaces).
+  - Package health warnings: reports missing `uv.lock` or `pyproject.toml`.
+
+### Fixed
+- **`setup dep --all`**: `install/` directory now created at workspace root (`ws/install/<pkg>/.venv`), not inside `src/` (`ws/src/install/src/<pkg>/.venv`).
+- **`setup dep --all`**: Removed extra `src/` layer in install structure — packages are now directly under `install/<pkg>/`.
+- **Clippy**: Resolved 6 `collapsible_if` warnings; `cargo fmt` applied.
+
 ### Changed
 - **Docs: "Why Not Just Use an Agent Framework?"** — new section in `philosophy.md/.zh.md` comparing Tagentacle's OS-level approach against super-app frameworks (OpenClaw, Claude Code, ADK), with litmus test and historical parallels.
 - **Docs: "The Plugin Trap"** — new section 5 in `why-tagentacle.md/.zh.md` analyzing in-process plugin systems (category confusion, patch accumulation, ADK shared-dict multi-agent) vs OS-level composition.

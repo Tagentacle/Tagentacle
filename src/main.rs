@@ -1489,6 +1489,14 @@ async fn run_test(
             continue;
         }
 
+        // Package health checks
+        if !pkg_dir.join("pyproject.toml").exists() {
+            println!("[{}] ⚠ Warning: no pyproject.toml found — not a standard Tagentacle package", pkg_name);
+        }
+        if !pkg_dir.join("uv.lock").exists() {
+            println!("[{}] ⚠ Warning: no uv.lock found — run 'uv sync' or 'tagentacle setup dep' to lock dependencies", pkg_name);
+        }
+
         println!("[{}] Running tests...", pkg_name);
 
         // Source the package .venv if available
