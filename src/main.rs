@@ -66,6 +66,21 @@ enum Commands {
         #[command(subcommand)]
         action: SetupAction,
     },
+    /// Run tests for a package or the entire workspace (starts daemon automatically)
+    Test {
+        /// Path to a single package directory containing tests/
+        #[arg(long)]
+        pkg: Option<String>,
+        /// Scan workspace src/ directory and run tests for all packages
+        #[arg(long)]
+        all: Option<String>,
+        /// Daemon address (auto-started if not already running)
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+        /// Extra arguments forwarded to pytest (e.g. "-v --timeout=30 -k pubsub")
+        #[arg(last = true)]
+        pytest_args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -380,6 +395,14 @@ async fn main() -> Result<()> {
                 run_setup_clean(workspace).await?;
             }
         },
+        Some(Commands::Test {
+            pkg,
+            all,
+            addr,
+            pytest_args,
+        }) => {
+            run_test(pkg, all, addr, pytest_args).await?;
+        }
         None => {
             Cli::command().print_help()?;
             println!();
@@ -1401,4 +1424,196 @@ async fn run_setup_clean(workspace_path: String) -> Result<()> {
 
     println!("✓ install/ directory removed.");
     Ok(())
+}
+
+// --- CLI Tool: test ---
+
+/// Run pytest for one or more packages, auto-starting daemon as needed.
+async fn run_test(
+    pkg: Option<String>,
+    all: Option<String>,
+    addr: String,
+    pytest_args: Vec<String>,
+) -> Result<()> {
+    println!("Tagentacle Test");
+    println!("===============");
+
+    // 1. Check if daemon is already running; if not, start one.
+    let daemon_child = ensure_daemon(&addr).await?;
+
+    let daemon_url = format!("tcp://{}", addr);
+
+    // 2. Collect packages to test
+    let packages: Vec<PathBuf> = if let Some(ws_src) = all {
+        let src_dir = PathBuf::from(&ws_src)
+            .canonicalize()
+            .with_context(|| format!("src directory not found: {}", ws_src))?;
+        find_testable_packages(&src_dir)?
+    } else if let Some(p) = pkg {
+        let d = PathBuf::from(&p)
+            .canonicalize()
+            .with_context(|| format!("Package directory not found: {}", p))?;
+        vec![d]
+    } else {
+        // Default: current directory
+        vec![std::env::current_dir()?]
+    };
+
+    if packages.is_empty() {
+        println!("No testable packages found.");
+        // Clean up daemon if we started it
+        cleanup_daemon(daemon_child).await;
+        return Ok(());
+    }
+
+    println!("Packages to test: {}", packages.len());
+    for p in &packages {
+        println!("  - {}", p.display());
+    }
+    println!();
+
+    // 3. Run pytest for each package
+    let mut total_pass = 0u32;
+    let mut total_fail = 0u32;
+
+    for pkg_dir in &packages {
+        let pkg_name = pkg_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let tests_dir = pkg_dir.join("tests");
+
+        if !tests_dir.exists() {
+            println!("[{}] No tests/ directory, skipping.", pkg_name);
+            continue;
+        }
+
+        println!("[{}] Running tests...", pkg_name);
+
+        // Source the package .venv if available
+        let venv_activate = pkg_dir.join(".venv/bin/activate");
+        let mut pytest_cmd_parts: Vec<String> = Vec::new();
+
+        if venv_activate.exists() {
+            pytest_cmd_parts.push(format!("source {}", venv_activate.display()));
+            pytest_cmd_parts.push("&&".to_string());
+        }
+
+        pytest_cmd_parts.push("python -m pytest tests/".to_string());
+        pytest_cmd_parts.push("-v".to_string());
+
+        // Append user-provided pytest args (shell-quote args containing spaces)
+        for arg in &pytest_args {
+            if arg.contains(' ') || arg.contains('\'') || arg.contains('"') {
+                // Wrap in single quotes, escaping any embedded single quotes
+                let escaped = arg.replace('\'', "'\\''");
+                pytest_cmd_parts.push(format!("'{}'", escaped));
+            } else {
+                pytest_cmd_parts.push(arg.clone());
+            }
+        }
+
+        let shell_cmd = pytest_cmd_parts.join(" ");
+
+        let status = Command::new("bash")
+            .args(["-c", &shell_cmd])
+            .current_dir(pkg_dir)
+            .env("TAGENTACLE_DAEMON_URL", &daemon_url)
+            .env("TAGENTACLE_BIN", std::env::current_exe()?.to_string_lossy().to_string())
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .with_context(|| format!("[{}] Failed to run pytest", pkg_name))?;
+
+        if status.success() {
+            total_pass += 1;
+            println!("[{}] ✓ PASSED\n", pkg_name);
+        } else {
+            total_fail += 1;
+            println!("[{}] ✗ FAILED (exit {})\n", pkg_name, status);
+        }
+    }
+
+    // 4. Summary
+    println!("==========================");
+    println!("Test Summary: {} passed, {} failed", total_pass, total_fail);
+    println!("==========================");
+
+    // 5. Cleanup daemon if we started it
+    cleanup_daemon(daemon_child).await;
+
+    if total_fail > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Check if daemon is running at `addr`; if not, start one in background.
+/// Returns `Some(Child)` if we started it (caller must clean up), or `None`.
+async fn ensure_daemon(addr: &str) -> Result<Option<tokio::process::Child>> {
+    use tokio::net::TcpStream;
+
+    print!("Checking daemon at {}... ", addr);
+    match TcpStream::connect(addr).await {
+        Ok(_) => {
+            println!("RUNNING ✓ (using existing daemon)");
+            Ok(None)
+        }
+        Err(_) => {
+            println!("NOT RUNNING");
+            println!("Starting daemon...");
+            let exe = std::env::current_exe()?;
+            let child = Command::new(exe)
+                .args(["daemon", "--addr", addr])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Failed to start daemon")?;
+
+            // Wait for it to be ready
+            let deadline =
+                tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
+            loop {
+                if tokio::time::Instant::now() > deadline {
+                    anyhow::bail!("Daemon failed to start within 10s");
+                }
+                if TcpStream::connect(addr).await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+            println!("Daemon started ✓");
+            Ok(Some(child))
+        }
+    }
+}
+
+/// If we spawned a daemon child, kill it gracefully.
+async fn cleanup_daemon(child: Option<tokio::process::Child>) {
+    if let Some(mut c) = child {
+        println!("Stopping daemon...");
+        let _ = c.kill().await;
+        let _ = c.wait().await;
+        println!("Daemon stopped.");
+    }
+}
+
+/// Find all packages under `src_dir` that contain a `tests/` directory.
+fn find_testable_packages(src_dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut packages = Vec::new();
+    if !src_dir.is_dir() {
+        anyhow::bail!("{} is not a directory", src_dir.display());
+    }
+    for entry in std::fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() && path.join("tests").is_dir() {
+            packages.push(path);
+        }
+    }
+    packages.sort();
+    Ok(packages)
 }
