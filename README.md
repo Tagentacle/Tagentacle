@@ -53,7 +53,7 @@ Tagentacle is not another Claude Code. **It is the infrastructure for managing c
 │  Topic Pub/Sub, Service RPC, /mcp/directory,         │
 │  Node identity, Lifecycle, TACL, Launch              │
 ├─────────────────────────────────────────────────────┤
-│  Linux (Kernel + Docker)                             │  ← "laws of physics"
+│  Linux (Kernel + Podman/Docker)                      │  ← "laws of physics"
 │  socket, namespace, cgroup, filesystem, signals      │
 └─────────────────────────────────────────────────────┘
 ```
