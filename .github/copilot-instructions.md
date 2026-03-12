@@ -56,6 +56,18 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 - `chore:` — tooling, CI, version bumps
 - `ci:` — CI configuration changes
 
+## E2E Testing
+
+End-to-end integration tests live in a separate repo: [test-bringup](https://github.com/Tagentacle/test-bringup)
+
+To run E2E tests locally against your daemon build:
+
+```bash
+TAGENTACLE_BIN=target/release/tagentacle pytest ../test-bringup -v
+```
+
+See `test-bringup/README.md` for details on the dependency management strategy.
+
 ## Architecture Notes
 
 - Daemon is a pure message router (like an IP router) — no schema validation
