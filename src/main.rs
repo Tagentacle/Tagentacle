@@ -1162,24 +1162,40 @@ async fn clone_workspace_repos(ws: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Scan a workspace directory for all tagentacle packages and run `uv sync` in each.
+/// Scan a workspace src directory for all tagentacle packages and run `uv sync` in each.
 /// Then generate the install/ workspace structure with symlinks.
+///
+/// Directory layout (ROS-style):
+///   ws/src/pkg1/.venv          ← actual venvs (created by uv sync)
+///   ws/src/pkg2/.venv
+///   ws/install/pkg1/.venv      ← symlinks into src
+///   ws/install/pkg2/.venv
+///   ws/install/setup_env.bash  ← sourceable env script
+///
+/// The `workspace_path` argument points to the `src/` directory.
 async fn run_setup_all(workspace_path: String) -> Result<()> {
-    let ws = PathBuf::from(&workspace_path)
+    let src_dir = PathBuf::from(&workspace_path)
         .canonicalize()
-        .with_context(|| format!("Workspace not found: {}", workspace_path))?;
+        .with_context(|| format!("Workspace src dir not found: {}", workspace_path))?;
 
-    println!("Tagentacle Setup — Workspace: {}", ws.display());
+    // Workspace root is the parent of src/
+    let ws_root = src_dir
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| src_dir.clone());
+
+    println!("Tagentacle Setup — Workspace: {}", ws_root.display());
+    println!("  src: {}", src_dir.display());
     println!("==========================================");
 
     // Phase 0: Auto-clone missing repos declared in [workspace.repos]
-    clone_workspace_repos(&ws).await?;
+    clone_workspace_repos(&src_dir).await?;
 
     // Phase 1: Recursively find directories containing tagentacle.toml
     // (re-scan after cloning to pick up newly cloned packages)
-    let pkgs = find_all_packages(&ws)?;
+    let pkgs = find_all_packages(&src_dir)?;
     if pkgs.is_empty() {
-        println!("No tagentacle packages found in {}", ws.display());
+        println!("No tagentacle packages found in {}", src_dir.display());
         return Ok(());
     }
 
@@ -1202,14 +1218,14 @@ async fn run_setup_all(workspace_path: String) -> Result<()> {
         }
     }
 
-    // Generate the install/ structure
+    // Generate the install/ structure at ws_root (sibling of src/)
     println!("\nGenerating install/ workspace structure...");
-    generate_install_structure(&ws, &pkgs)?;
+    generate_install_structure(&ws_root, &pkgs)?;
 
     println!("\n✓ Setup complete!");
     println!(
         "  Source the environment: source {}/install/setup_env.bash",
-        ws.display()
+        ws_root.display()
     );
 
     Ok(())
@@ -1266,25 +1282,24 @@ fn find_packages_recursive(
 }
 
 /// Generate the install/ workspace structure:
-///   install/src/<pkg_name>/.venv → symlink to actual pkg's .venv
-///   install/setup_env.bash → sourceable env script
+///   install/<pkg_name>/.venv → symlink to actual pkg's .venv
+///   install/setup_env.bash   → sourceable env script
 fn generate_install_structure(ws_root: &Path, pkgs: &[(String, PathBuf)]) -> Result<()> {
     let install_dir = ws_root.join("install");
-    let install_src = install_dir.join("src");
 
-    // Create install/src/ directory
-    std::fs::create_dir_all(&install_src).context("Failed to create install/src/ directory")?;
+    // Create install/ directory
+    std::fs::create_dir_all(&install_dir).context("Failed to create install/ directory")?;
 
     let mut activated_paths: Vec<(String, PathBuf)> = Vec::new();
 
     for (name, pkg_path) in pkgs {
         let venv_dir = pkg_path.join(".venv");
-        let install_pkg_dir = install_src.join(name);
+        let install_pkg_dir = install_dir.join(name);
 
-        // Create install/src/<pkg_name>/
+        // Create install/<pkg_name>/
         std::fs::create_dir_all(&install_pkg_dir)?;
 
-        // Create or update symlink: install/src/<pkg_name>/.venv → <pkg_path>/.venv
+        // Create or update symlink: install/<pkg_name>/.venv → <pkg_path>/.venv
         let symlink_path = install_pkg_dir.join(".venv");
         if symlink_path.exists() || symlink_path.symlink_metadata().is_ok() {
             std::fs::remove_file(&symlink_path).ok();
@@ -1370,11 +1385,8 @@ async fn run_setup_clean(workspace_path: String) -> Result<()> {
 
     println!("Tagentacle Clean — removing install/ structure...");
 
-    // Remove symlinks in install/src/<pkg>/
-    let install_src = install_dir.join("src");
-    if install_src.exists()
-        && let Ok(entries) = std::fs::read_dir(&install_src)
-    {
+    // Remove symlinks in install/<pkg>/
+    if let Ok(entries) = std::fs::read_dir(&install_dir) {
         for entry in entries.flatten() {
             let venv_link = entry.path().join(".venv");
             if venv_link.symlink_metadata().is_ok() {
