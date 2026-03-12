@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_util::codec::{Framed, LinesCodec};
 use uuid::Uuid;
 
@@ -158,9 +158,9 @@ enum Action {
 /// Metadata for a connected node.
 struct NodeEntry {
     tx: mpsc::UnboundedSender<Value>,
-    connected_at: String,   // ISO 8601 timestamp
-    registered: bool,       // true if node sent a Register message
-    last_pong: Instant,     // last heartbeat response
+    connected_at: String, // ISO 8601 timestamp
+    registered: bool,     // true if node sent a Register message
+    last_pong: Instant,   // last heartbeat response
 }
 
 struct Router {
@@ -216,7 +216,8 @@ impl Router {
     /// Publish a message to a topic (used for internal node_events publishing).
     fn publish_internal(&self, topic: &str, sender: &str, payload: Value) {
         if let Some(subs) = self.subscriptions.get(topic) {
-            let push = json!({"op": "message", "topic": topic, "sender": sender, "payload": payload});
+            let push =
+                json!({"op": "message", "topic": topic, "sender": sender, "payload": payload});
             for (_, sub_tx) in subs {
                 let _ = sub_tx.send(push.clone());
             }
@@ -246,43 +247,63 @@ impl Router {
                 }))
             }
             "/tagentacle/list_nodes" => {
-                let nodes: Vec<Value> = self.nodes.iter().map(|(id, entry)| {
-                    json!({
-                        "node_id": id,
-                        "connected_at": entry.connected_at,
-                        "registered": entry.registered
+                let nodes: Vec<Value> = self
+                    .nodes
+                    .iter()
+                    .map(|(id, entry)| {
+                        json!({
+                            "node_id": id,
+                            "connected_at": entry.connected_at,
+                            "registered": entry.registered
+                        })
                     })
-                }).collect();
+                    .collect();
                 Some(json!({ "nodes": nodes }))
             }
             "/tagentacle/list_topics" => {
-                let topics: Vec<Value> = self.subscriptions.iter().map(|(name, subs)| {
-                    let subscriber_ids: Vec<&str> = subs.iter().map(|(id, _)| id.as_str()).collect();
-                    json!({
-                        "name": name,
-                        "subscriber_count": subs.len(),
-                        "subscribers": subscriber_ids
+                let topics: Vec<Value> = self
+                    .subscriptions
+                    .iter()
+                    .map(|(name, subs)| {
+                        let subscriber_ids: Vec<&str> =
+                            subs.iter().map(|(id, _)| id.as_str()).collect();
+                        json!({
+                            "name": name,
+                            "subscriber_count": subs.len(),
+                            "subscribers": subscriber_ids
+                        })
                     })
-                }).collect();
+                    .collect();
                 Some(json!({ "topics": topics }))
             }
             "/tagentacle/list_services" => {
-                let services: Vec<Value> = self.services.iter().map(|(name, (provider, _))| {
-                    json!({
-                        "name": name,
-                        "provider": provider
+                let services: Vec<Value> = self
+                    .services
+                    .iter()
+                    .map(|(name, (provider, _))| {
+                        json!({
+                            "name": name,
+                            "provider": provider
+                        })
                     })
-                }).collect();
+                    .collect();
                 Some(json!({ "services": services }))
             }
             "/tagentacle/get_node_info" => {
-                let target = payload.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
+                let target = payload
+                    .get("node_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if let Some(entry) = self.nodes.get(target) {
-                    let subs: Vec<&str> = self.subscriptions.iter()
+                    let subs: Vec<&str> = self
+                        .subscriptions
+                        .iter()
                         .filter(|(_, s)| s.iter().any(|(id, _)| id == target))
                         .map(|(topic, _)| topic.as_str())
                         .collect();
-                    let svcs: Vec<&str> = self.services.iter()
+                    let svcs: Vec<&str> = self
+                        .services
+                        .iter()
                         .filter(|(_, (id, _))| id == target)
                         .map(|(name, _)| name.as_str())
                         .collect();
@@ -329,7 +350,11 @@ async fn main() -> Result<()> {
             }
         },
         Some(Commands::Service { action }) => match action {
-            ServiceAction::Call { service, payload, addr } => {
+            ServiceAction::Call {
+                service,
+                payload,
+                addr,
+            } => {
                 run_service_call(addr, service, payload).await?;
             }
         },
@@ -380,7 +405,9 @@ async fn run_daemon(addr: String) -> Result<()> {
             let ping_msg = json!({"op": "ping"});
 
             // Collect stale nodes (no pong for > 90s)
-            let stale: Vec<String> = r.nodes.iter()
+            let stale: Vec<String> = r
+                .nodes
+                .iter()
                 .filter(|(_, entry)| entry.last_pong.elapsed().as_secs() > 90)
                 .map(|(id, _)| id.clone())
                 .collect();
@@ -535,7 +562,8 @@ async fn run_topic_echo(addr: String, topic: String) -> Result<()> {
     let node_id = format!("cli_echo_{}", &Uuid::new_v4().to_string()[..8]);
     println!("Subscribing to '{}' as node '{}'...", topic, node_id);
 
-    let stream = TcpStream::connect(&addr).await
+    let stream = TcpStream::connect(&addr)
+        .await
         .context("Failed to connect to Tagentacle Daemon. Is it running?")?;
     let mut framed = Framed::new(stream, LinesCodec::new());
 
@@ -550,12 +578,12 @@ async fn run_topic_echo(addr: String, topic: String) -> Result<()> {
     println!("Listening on '{}'... (Ctrl+C to stop)", topic);
 
     while let Some(Ok(line)) = framed.next().await {
-        if let Ok(msg) = serde_json::from_str::<Value>(&line) {
-            if msg.get("op").and_then(|v| v.as_str()) == Some("message") {
-                let sender = msg.get("sender").and_then(|v| v.as_str()).unwrap_or("?");
-                let payload = msg.get("payload").unwrap_or(&Value::Null);
-                println!("[{}] {}", sender, serde_json::to_string_pretty(payload)?);
-            }
+        if let Ok(msg) = serde_json::from_str::<Value>(&line)
+            && msg.get("op").and_then(|v| v.as_str()) == Some("message")
+        {
+            let sender = msg.get("sender").and_then(|v| v.as_str()).unwrap_or("?");
+            let payload = msg.get("payload").unwrap_or(&Value::Null);
+            println!("[{}] {}", sender, serde_json::to_string_pretty(payload)?);
         }
     }
 
@@ -573,7 +601,8 @@ async fn run_service_call(addr: String, service: String, payload_str: String) ->
 
     println!("Calling service '{}' as node '{}'...", service, node_id);
 
-    let stream = TcpStream::connect(&addr).await
+    let stream = TcpStream::connect(&addr)
+        .await
         .context("Failed to connect to Tagentacle Daemon. Is it running?")?;
     let mut framed = Framed::new(stream, LinesCodec::new());
 
@@ -590,14 +619,13 @@ async fn run_service_call(addr: String, service: String, payload_str: String) ->
     // Wait for response
     println!("Waiting for response...");
     while let Some(Ok(line)) = framed.next().await {
-        if let Ok(msg) = serde_json::from_str::<Value>(&line) {
-            if msg.get("op").and_then(|v| v.as_str()) == Some("service_response") {
-                if msg.get("request_id").and_then(|v| v.as_str()) == Some(&request_id) {
-                    let result = msg.get("payload").unwrap_or(&Value::Null);
-                    println!("Response:\n{}", serde_json::to_string_pretty(result)?);
-                    return Ok(());
-                }
-            }
+        if let Ok(msg) = serde_json::from_str::<Value>(&line)
+            && msg.get("op").and_then(|v| v.as_str()) == Some("service_response")
+            && msg.get("request_id").and_then(|v| v.as_str()) == Some(&request_id)
+        {
+            let result = msg.get("payload").unwrap_or(&Value::Null);
+            println!("Response:\n{}", serde_json::to_string_pretty(result)?);
+            return Ok(());
         }
     }
 
@@ -631,8 +659,8 @@ async fn run_doctor(addr: String) -> Result<()> {
 
 /// Parse a minimal tagentacle.toml to extract package info
 fn parse_pkg_toml(path: &Path) -> Result<Value> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Cannot read {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("Cannot read {}", path.display()))?;
     // Minimal TOML parser: extract key = "value" pairs
     // For a real implementation, use the `toml` crate
     let mut map = serde_json::Map::new();
@@ -643,12 +671,12 @@ fn parse_pkg_toml(path: &Path) -> Result<Value> {
             continue;
         }
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            section = trimmed[1..trimmed.len()-1].to_string();
+            section = trimmed[1..trimmed.len() - 1].to_string();
             continue;
         }
         if let Some(eq_pos) = trimmed.find('=') {
             let key = trimmed[..eq_pos].trim();
-            let val = trimmed[eq_pos+1..].trim().trim_matches('"');
+            let val = trimmed[eq_pos + 1..].trim().trim_matches('"');
             let full_key = if section.is_empty() {
                 key.to_string()
             } else {
@@ -661,7 +689,8 @@ fn parse_pkg_toml(path: &Path) -> Result<Value> {
 }
 
 async fn run_package(pkg_path: String, addr: String) -> Result<()> {
-    let pkg_dir = PathBuf::from(&pkg_path).canonicalize()
+    let pkg_dir = PathBuf::from(&pkg_path)
+        .canonicalize()
         .with_context(|| format!("Package directory not found: {}", pkg_path))?;
     let toml_path = pkg_dir.join("tagentacle.toml");
 
@@ -670,10 +699,12 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
     }
 
     let pkg_info = parse_pkg_toml(&toml_path)?;
-    let pkg_name = pkg_info.get("package.name")
+    let pkg_name = pkg_info
+        .get("package.name")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
-    let entry = pkg_info.get("entry_points.node")
+    let entry = pkg_info
+        .get("entry_points.node")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
@@ -683,8 +714,10 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
     let py_command = if !entry.is_empty() {
         let parts: Vec<&str> = entry.split(':').collect();
         if parts.len() == 2 {
-            format!("python -c \"from {} import {}; import asyncio; asyncio.run({}())\"",
-                parts[0], parts[1], parts[1])
+            format!(
+                "python -c \"from {} import {}; import asyncio; asyncio.run({}())\"",
+                parts[0], parts[1], parts[1]
+            )
         } else {
             format!("python {}", entry)
         }
@@ -697,7 +730,10 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
         } else if pkg_dir.join("client.py").exists() {
             "python client.py".to_string()
         } else {
-            anyhow::bail!("No entry point found in {} (set entry_points.node in tagentacle.toml)", pkg_dir.display());
+            anyhow::bail!(
+                "No entry point found in {} (set entry_points.node in tagentacle.toml)",
+                pkg_dir.display()
+            );
         }
     };
 
@@ -706,7 +742,11 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
     let venv_dir = pkg_dir.join(".venv");
     let shell_command = if venv_dir.join("bin/activate").exists() {
         println!("  Activating venv: {}", venv_dir.display());
-        format!("source {}/bin/activate && {}", venv_dir.display(), py_command)
+        format!(
+            "source {}/bin/activate && {}",
+            venv_dir.display(),
+            py_command
+        )
     } else {
         // No local venv — use system python, warn user
         println!("  ⚠ No .venv found. Using system Python.");
@@ -737,7 +777,8 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
 // --- CLI Tool: launch ---
 
 async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
-    let config_file = PathBuf::from(&config_path).canonicalize()
+    let config_file = PathBuf::from(&config_path)
+        .canonicalize()
         .with_context(|| format!("Launch config not found: {}", config_path))?;
     let config_dir = config_file.parent().unwrap();
 
@@ -758,8 +799,14 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
             println!("NOT RUNNING");
             println!("Starting daemon...");
             let _daemon = Command::new("sh")
-                .args(["-c", &format!("{} daemon --addr {}",
-                    std::env::current_exe()?.display(), addr)])
+                .args([
+                    "-c",
+                    &format!(
+                        "{} daemon --addr {}",
+                        std::env::current_exe()?.display(),
+                        addr
+                    ),
+                ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -770,7 +817,10 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
 
     // Build env vars from parameters
     let mut env_vars: HashMap<String, String> = HashMap::new();
-    env_vars.insert("TAGENTACLE_DAEMON_URL".to_string(), format!("tcp://{}", addr));
+    env_vars.insert(
+        "TAGENTACLE_DAEMON_URL".to_string(),
+        format!("tcp://{}", addr),
+    );
     for (k, v) in &config.parameters {
         env_vars.insert(k.clone(), v.clone());
     }
@@ -781,8 +831,10 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
         let bringup_dir = config_dir.parent().unwrap_or(config_dir);
         let secrets_path = bringup_dir.join(secrets_file);
         if secrets_path.exists() {
-            env_vars.insert("TAGENTACLE_SECRETS_FILE".to_string(),
-                secrets_path.to_string_lossy().to_string());
+            env_vars.insert(
+                "TAGENTACLE_SECRETS_FILE".to_string(),
+                secrets_path.to_string_lossy().to_string(),
+            );
             println!("Secrets: {} ✓", secrets_path.display());
         } else {
             println!("Secrets: {} (not found, skipped)", secrets_path.display());
@@ -791,8 +843,11 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
 
     // Launch nodes in order
     let mut processes: Vec<(String, tokio::process::Child)> = Vec::new();
-    let nodes_dir = config_dir.parent().unwrap_or(config_dir)
-        .parent().unwrap_or(config_dir); // Go up from launch/ to bringup_pkg/ to src/
+    let nodes_dir = config_dir
+        .parent()
+        .unwrap_or(config_dir)
+        .parent()
+        .unwrap_or(config_dir); // Go up from launch/ to bringup_pkg/ to src/
 
     // Build a lookup table: tagentacle.toml package name → directory path
     let known_pkgs = find_all_packages(nodes_dir).unwrap_or_default();
@@ -812,7 +867,8 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
 
         // Resolve package directory: first by tagentacle.toml name, then by dir name,
         // then try kebab-case conversion (snake_case → kebab-case).
-        let pkg_dir = known_pkgs.iter()
+        let pkg_dir = known_pkgs
+            .iter()
             .find(|(name, _)| name == &node.package)
             .map(|(_, p)| p.clone())
             .unwrap_or_else(|| {
@@ -825,17 +881,31 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
                 }
             });
         if !pkg_dir.exists() {
-            eprintln!("[{}] Package dir not found: {} (looked for '{}' in {})",
-                node.name, pkg_dir.display(), node.package, nodes_dir.display());
+            eprintln!(
+                "[{}] Package dir not found: {} (looked for '{}' in {})",
+                node.name,
+                pkg_dir.display(),
+                node.package,
+                nodes_dir.display()
+            );
             continue;
         }
 
-        println!("[{}] Starting: {} (in {})", node.name, node.command, pkg_dir.display());
+        println!(
+            "[{}] Starting: {} (in {})",
+            node.name,
+            node.command,
+            pkg_dir.display()
+        );
 
         // Source the package's .venv if it exists (per-node isolation)
         let venv_activate = pkg_dir.join(".venv/bin/activate");
         let shell_cmd = if venv_activate.exists() {
-            println!("[{}]   venv: {}", node.name, pkg_dir.join(".venv").display());
+            println!(
+                "[{}]   venv: {}",
+                node.name,
+                pkg_dir.join(".venv").display()
+            );
             format!("source {} && {}", venv_activate.display(), node.command)
         } else {
             node.command.clone()
@@ -936,16 +1006,20 @@ struct LaunchNode {
 }
 
 fn parse_launch_toml(content: &str) -> Result<LaunchConfig> {
-    let raw: LaunchToml = toml::from_str(content)
-        .with_context(|| "Failed to parse launch TOML")?;
+    let raw: LaunchToml = toml::from_str(content).with_context(|| "Failed to parse launch TOML")?;
 
-    let nodes = raw.nodes.unwrap_or_default().into_iter().map(|n| LaunchNode {
-        name: n.name,
-        package: n.package,
-        command: n.command,
-        depends_on: n.depends_on,
-        startup_delay: n.startup_delay,
-    }).collect();
+    let nodes = raw
+        .nodes
+        .unwrap_or_default()
+        .into_iter()
+        .map(|n| LaunchNode {
+            name: n.name,
+            package: n.package,
+            command: n.command,
+            depends_on: n.depends_on,
+            startup_delay: n.startup_delay,
+        })
+        .collect();
 
     Ok(LaunchConfig {
         daemon_addr: raw.daemon.and_then(|d| d.addr),
@@ -960,7 +1034,8 @@ fn parse_launch_toml(content: &str) -> Result<LaunchConfig> {
 /// Run `uv sync` in a single package directory.
 /// The package must have a pyproject.toml (i.e. be a uv project).
 async fn run_setup_dep(pkg_path: String) -> Result<()> {
-    let pkg_dir = PathBuf::from(&pkg_path).canonicalize()
+    let pkg_dir = PathBuf::from(&pkg_path)
+        .canonicalize()
         .with_context(|| format!("Package directory not found: {}", pkg_path))?;
 
     let pyproject = pkg_dir.join("pyproject.toml");
@@ -973,13 +1048,17 @@ async fn run_setup_dep(pkg_path: String) -> Result<()> {
             .unwrap_or("unknown")
             .to_string()
     } else {
-        pkg_dir.file_name()
+        pkg_dir
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string())
     };
 
     if !pyproject.exists() {
-        println!("[{}] ⚠ No pyproject.toml found — not a uv project.", pkg_name);
+        println!(
+            "[{}] ⚠ No pyproject.toml found — not a uv project.",
+            pkg_name
+        );
         println!("    Please configure the environment manually with uv.");
         println!("    Hint: cd {} && uv init --vcs none", pkg_dir.display());
         return Ok(());
@@ -1014,20 +1093,23 @@ async fn clone_workspace_repos(ws: &Path) -> Result<()> {
     let existing_pkgs = find_all_packages(ws)?;
     for (_name, pkg_path) in &existing_pkgs {
         let toml_path = pkg_path.join("tagentacle.toml");
-        if !toml_path.exists() { continue; }
+        if !toml_path.exists() {
+            continue;
+        }
 
         let content = std::fs::read_to_string(&toml_path)
             .with_context(|| format!("Cannot read {}", toml_path.display()))?;
-        let doc: toml::Value = content.parse::<toml::Value>()
+        let doc: toml::Value = content
+            .parse::<toml::Value>()
             .with_context(|| format!("Invalid TOML in {}", toml_path.display()))?;
 
         // Navigate: workspace -> repos -> { repo_name: { git: "url" } }
-        if let Some(workspace) = doc.get("workspace").and_then(|v| v.as_table()) {
-            if let Some(repos) = workspace.get("repos").and_then(|v| v.as_table()) {
-                for (repo_name, repo_val) in repos {
-                    if let Some(git_url) = repo_val.get("git").and_then(|v| v.as_str()) {
-                        repos_to_clone.push((repo_name.clone(), git_url.to_string()));
-                    }
+        if let Some(workspace) = doc.get("workspace").and_then(|v| v.as_table())
+            && let Some(repos) = workspace.get("repos").and_then(|v| v.as_table())
+        {
+            for (repo_name, repo_val) in repos {
+                if let Some(git_url) = repo_val.get("git").and_then(|v| v.as_str()) {
+                    repos_to_clone.push((repo_name.clone(), git_url.to_string()));
                 }
             }
         }
@@ -1069,7 +1151,10 @@ async fn clone_workspace_repos(ws: &Path) -> Result<()> {
             println!("  ✓ Cloned {}.", dir_name);
             cloned += 1;
         } else {
-            eprintln!("  ✗ Failed to clone {} (exit {}). Continuing...", dir_name, status);
+            eprintln!(
+                "  ✗ Failed to clone {} (exit {}). Continuing...",
+                dir_name, status
+            );
         }
     }
 
@@ -1080,7 +1165,8 @@ async fn clone_workspace_repos(ws: &Path) -> Result<()> {
 /// Scan a workspace directory for all tagentacle packages and run `uv sync` in each.
 /// Then generate the install/ workspace structure with symlinks.
 async fn run_setup_all(workspace_path: String) -> Result<()> {
-    let ws = PathBuf::from(&workspace_path).canonicalize()
+    let ws = PathBuf::from(&workspace_path)
+        .canonicalize()
         .with_context(|| format!("Workspace not found: {}", workspace_path))?;
 
     println!("Tagentacle Setup — Workspace: {}", ws.display());
@@ -1109,7 +1195,10 @@ async fn run_setup_all(workspace_path: String) -> Result<()> {
         if pyproject.exists() {
             run_setup_dep(path.to_string_lossy().to_string()).await?;
         } else {
-            println!("[{}] ⚠ Skipped — no pyproject.toml (not a uv project).", name);
+            println!(
+                "[{}] ⚠ Skipped — no pyproject.toml (not a uv project).",
+                name
+            );
         }
     }
 
@@ -1118,7 +1207,10 @@ async fn run_setup_all(workspace_path: String) -> Result<()> {
     generate_install_structure(&ws, &pkgs)?;
 
     println!("\n✓ Setup complete!");
-    println!("  Source the environment: source {}/install/setup_env.bash", ws.display());
+    println!(
+        "  Source the environment: source {}/install/setup_env.bash",
+        ws.display()
+    );
 
     Ok(())
 }
@@ -1130,13 +1222,20 @@ fn find_all_packages(root: &Path) -> Result<Vec<(String, PathBuf)>> {
     Ok(pkgs)
 }
 
-fn find_packages_recursive(dir: &Path, pkgs: &mut Vec<(String, PathBuf)>, depth: usize) -> Result<()> {
-    if depth > 5 { return Ok(()); } // Limit recursion depth
+fn find_packages_recursive(
+    dir: &Path,
+    pkgs: &mut Vec<(String, PathBuf)>,
+    depth: usize,
+) -> Result<()> {
+    if depth > 5 {
+        return Ok(());
+    } // Limit recursion depth
 
     let toml_path = dir.join("tagentacle.toml");
     if toml_path.exists() {
         let info = parse_pkg_toml(&toml_path)?;
-        let name = info.get("package.name")
+        let name = info
+            .get("package.name")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();
@@ -1145,12 +1244,14 @@ fn find_packages_recursive(dir: &Path, pkgs: &mut Vec<(String, PathBuf)>, depth:
     }
 
     // Skip hidden dirs, .venv, __pycache__, target, node_modules, install
-    if let Some(dirname) = dir.file_name().and_then(|n| n.to_str()) {
-        if dirname.starts_with('.') || dirname == "__pycache__"
-            || dirname == "target" || dirname == "node_modules"
-            || dirname == "install" {
-            return Ok(());
-        }
+    if let Some(dirname) = dir.file_name().and_then(|n| n.to_str())
+        && (dirname.starts_with('.')
+            || dirname == "__pycache__"
+            || dirname == "target"
+            || dirname == "node_modules"
+            || dirname == "install")
+    {
+        return Ok(());
     }
 
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -1172,8 +1273,7 @@ fn generate_install_structure(ws_root: &Path, pkgs: &[(String, PathBuf)]) -> Res
     let install_src = install_dir.join("src");
 
     // Create install/src/ directory
-    std::fs::create_dir_all(&install_src)
-        .context("Failed to create install/src/ directory")?;
+    std::fs::create_dir_all(&install_src).context("Failed to create install/src/ directory")?;
 
     let mut activated_paths: Vec<(String, PathBuf)> = Vec::new();
 
@@ -1207,7 +1307,9 @@ fn generate_install_structure(ws_root: &Path, pkgs: &[(String, PathBuf)]) -> Res
     script.push_str("# Tagentacle workspace environment setup\n");
     script.push_str("# Auto-generated by `tagentacle setup dep --all`\n");
     script.push_str("# Usage: source install/setup_env.bash\n\n");
-    script.push_str("_TAGENTACLE_INSTALL_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n\n");
+    script.push_str(
+        "_TAGENTACLE_INSTALL_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n\n",
+    );
 
     for (name, venv_path) in &activated_paths {
         script.push_str(&format!(
@@ -1224,14 +1326,15 @@ fn generate_install_structure(ws_root: &Path, pkgs: &[(String, PathBuf)]) -> Res
     script.push_str("echo \"Tagentacle environment loaded (");
     script.push_str(&format!("{} packages).\"\n", activated_paths.len()));
 
-    std::fs::write(&bash_path, &script)
-        .context("Failed to write setup_env.bash")?;
+    std::fs::write(&bash_path, &script).context("Failed to write setup_env.bash")?;
 
     // Add install/ to .gitignore if not already present
     let gitignore = ws_root.join(".gitignore");
     let needs_entry = if gitignore.exists() {
         let content = std::fs::read_to_string(&gitignore).unwrap_or_default();
-        !content.lines().any(|l| l.trim() == "install/" || l.trim() == "/install/")
+        !content
+            .lines()
+            .any(|l| l.trim() == "install/" || l.trim() == "/install/")
     } else {
         true
     };
@@ -1252,12 +1355,16 @@ fn generate_install_structure(ws_root: &Path, pkgs: &[(String, PathBuf)]) -> Res
 // --- CLI Tool: setup clean ---
 
 async fn run_setup_clean(workspace_path: String) -> Result<()> {
-    let ws = PathBuf::from(&workspace_path).canonicalize()
+    let ws = PathBuf::from(&workspace_path)
+        .canonicalize()
         .with_context(|| format!("Workspace not found: {}", workspace_path))?;
 
     let install_dir = ws.join("install");
     if !install_dir.exists() {
-        println!("No install/ directory found in {}. Nothing to clean.", ws.display());
+        println!(
+            "No install/ directory found in {}. Nothing to clean.",
+            ws.display()
+        );
         return Ok(());
     }
 
@@ -1265,21 +1372,20 @@ async fn run_setup_clean(workspace_path: String) -> Result<()> {
 
     // Remove symlinks in install/src/<pkg>/
     let install_src = install_dir.join("src");
-    if install_src.exists() {
-        if let Ok(entries) = std::fs::read_dir(&install_src) {
-            for entry in entries.flatten() {
-                let venv_link = entry.path().join(".venv");
-                if venv_link.symlink_metadata().is_ok() {
-                    std::fs::remove_file(&venv_link)?;
-                    println!("  Removed symlink: {}", venv_link.display());
-                }
+    if install_src.exists()
+        && let Ok(entries) = std::fs::read_dir(&install_src)
+    {
+        for entry in entries.flatten() {
+            let venv_link = entry.path().join(".venv");
+            if venv_link.symlink_metadata().is_ok() {
+                std::fs::remove_file(&venv_link)?;
+                println!("  Removed symlink: {}", venv_link.display());
             }
         }
     }
 
     // Remove the install/ directory
-    std::fs::remove_dir_all(&install_dir)
-        .context("Failed to remove install/ directory")?;
+    std::fs::remove_dir_all(&install_dir).context("Failed to remove install/ directory")?;
 
     println!("✓ install/ directory removed.");
     Ok(())
