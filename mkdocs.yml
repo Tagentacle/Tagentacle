@@ -78,6 +78,7 @@ nav:
   - Core Concepts:
     - Philosophy: concepts/philosophy.md
     - Why Tagentacle: concepts/why-tagentacle.md
+    - Design Lineage: concepts/internet-dna.md
     - Architecture: concepts/architecture.md
     - Agent Architecture: concepts/agent-architecture.md
   - Guides:
