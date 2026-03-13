@@ -1491,10 +1491,18 @@ async fn run_test(
 
         // Package health checks
         if !pkg_dir.join("pyproject.toml").exists() {
-            println!("[{}] ⚠ Warning: no pyproject.toml found — not a standard Tagentacle package", pkg_name);
+            println!(
+                "[{}] ⚠ Warning: no pyproject.toml — not a standard Tagentacle package",
+                pkg_name
+            );
         }
         if !pkg_dir.join("uv.lock").exists() {
-            println!("[{}] ⚠ Warning: no uv.lock found — run 'uv sync' or 'tagentacle setup dep' to lock dependencies", pkg_name);
+            println!(
+                "[{}] ⚠ Warning: no uv.lock — run 'uv sync' or 'tagentacle setup dep' \
+                 to generate a lockfile (Tagentacle convention: uv.lock is the \
+                 reproducible deploy standard, pyproject.toml alone is not sufficient)",
+                pkg_name
+            );
         }
 
         println!("[{}] Running tests...", pkg_name);
@@ -1528,7 +1536,10 @@ async fn run_test(
             .args(["-c", &shell_cmd])
             .current_dir(pkg_dir)
             .env("TAGENTACLE_DAEMON_URL", &daemon_url)
-            .env("TAGENTACLE_BIN", std::env::current_exe()?.to_string_lossy().to_string())
+            .env(
+                "TAGENTACLE_BIN",
+                std::env::current_exe()?.to_string_lossy().to_string(),
+            )
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -1582,8 +1593,7 @@ async fn ensure_daemon(addr: &str) -> Result<Option<tokio::process::Child>> {
                 .context("Failed to start daemon")?;
 
             // Wait for it to be ready
-            let deadline =
-                tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
+            let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
             loop {
                 if tokio::time::Instant::now() > deadline {
                     anyhow::bail!("Daemon failed to start within 10s");

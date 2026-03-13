@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **`setup dep --all`**: `install/` directory now created at workspace root (`ws/install/<pkg>/.venv`), not inside `src/` (`ws/src/install/src/<pkg>/.venv`).
 - **`setup dep --all`**: Removed extra `src/` layer in install structure — packages are now directly under `install/<pkg>/`.
+- **`tagentacle test`**: Improved health check warning messages (uv.lock convention explanation).
+- **`cargo fmt`**: Applied formatting fixes.
 - **Clippy**: Resolved 6 `collapsible_if` warnings; `cargo fmt` applied.
 
 ### Changed

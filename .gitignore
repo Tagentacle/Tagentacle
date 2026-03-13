@@ -1,3 +1,8 @@
 /target
 *.bak
 /site
+
+# Python (workspace packages may exist alongside)
+__pycache__/
+.ruff_cache/
+.pytest_cache/
