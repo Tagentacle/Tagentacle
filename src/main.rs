@@ -81,6 +81,18 @@ enum Commands {
         #[arg(last = true)]
         pytest_args: Vec<String>,
     },
+    /// Lint a package or the entire workspace (Rust: cargo clippy+fmt, Python: ruff check+format)
+    Lint {
+        /// Path to a single package directory
+        #[arg(long)]
+        pkg: Option<String>,
+        /// Scan workspace src/ directory and lint all packages
+        #[arg(long)]
+        all: Option<String>,
+        /// Auto-fix lint issues where possible
+        #[arg(long)]
+        fix: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -402,6 +414,9 @@ async fn main() -> Result<()> {
             pytest_args,
         }) => {
             run_test(pkg, all, addr, pytest_args).await?;
+        }
+        Some(Commands::Lint { pkg, all, fix }) => {
+            run_lint(pkg, all, fix).await?;
         }
         None => {
             Cli::command().print_help()?;
@@ -1428,6 +1443,103 @@ async fn run_setup_clean(workspace_path: String) -> Result<()> {
 
 // --- CLI Tool: test ---
 
+/// Read [tool.tagentacle.test] from a pyproject.toml, returning (requires, extras).
+fn read_test_config(pkg_dir: &Path) -> Result<(Vec<String>, Vec<String>)> {
+    let pyproject_path = pkg_dir.join("pyproject.toml");
+    if !pyproject_path.exists() {
+        return Ok((vec![], vec![]));
+    }
+    let content = std::fs::read_to_string(&pyproject_path)
+        .with_context(|| format!("Cannot read {}", pyproject_path.display()))?;
+    let doc: toml::Value = content
+        .parse::<toml::Value>()
+        .with_context(|| format!("Invalid TOML in {}", pyproject_path.display()))?;
+
+    let test_section = doc
+        .get("tool")
+        .and_then(|t| t.get("tagentacle"))
+        .and_then(|t| t.get("test"));
+
+    let requires = test_section
+        .and_then(|s| s.get("requires"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let extras = test_section
+        .and_then(|s| s.get("extras"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok((requires, extras))
+}
+
+/// Ensure test dependencies are synced for a package (reads [tool.tagentacle.test]).
+async fn sync_test_deps(pkg_dir: &Path, pkg_name: &str) -> Result<()> {
+    let (requires, _extras) = read_test_config(pkg_dir)?;
+
+    if !requires.is_empty() {
+        println!("[{}] Test requires: {}", pkg_name, requires.join(", "));
+        // Find workspace root: walk up from pkg_dir to find sibling packages
+        let ws_root = pkg_dir.parent().unwrap_or(pkg_dir);
+
+        for dep_name in &requires {
+            let dep_dir = ws_root.join(dep_name);
+            if !dep_dir.exists() {
+                println!(
+                    "[{}] ⚠ Required dependency '{}' not found at {}",
+                    pkg_name,
+                    dep_name,
+                    dep_dir.display()
+                );
+                continue;
+            }
+            if !dep_dir.join(".venv").exists() {
+                println!("[{}] Syncing dependency '{}'...", pkg_name, dep_name);
+                let status = Command::new("uv")
+                    .arg("sync")
+                    .current_dir(&dep_dir)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .status()
+                    .await
+                    .with_context(|| format!("Failed to sync {}", dep_name))?;
+                if !status.success() {
+                    println!("[{}] ⚠ Failed to sync dependency '{}'", pkg_name, dep_name);
+                }
+            }
+        }
+    }
+
+    // Sync the test package itself
+    let pyproject = pkg_dir.join("pyproject.toml");
+    if pyproject.exists() && !pkg_dir.join(".venv").exists() {
+        println!("[{}] Syncing package deps...", pkg_name);
+        let status = Command::new("uv")
+            .arg("sync")
+            .current_dir(pkg_dir)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .context("Failed to run uv sync")?;
+        if !status.success() {
+            println!("[{}] ⚠ uv sync failed", pkg_name);
+        }
+    }
+
+    Ok(())
+}
+
 /// Run pytest for one or more packages, auto-starting daemon as needed.
 async fn run_test(
     pkg: Option<String>,
@@ -1504,6 +1616,9 @@ async fn run_test(
                 pkg_name
             );
         }
+
+        // Sync test dependencies declared in [tool.tagentacle.test]
+        sync_test_deps(pkg_dir, &pkg_name).await?;
 
         println!("[{}] Running tests...", pkg_name);
 
@@ -1634,4 +1749,216 @@ fn find_testable_packages(src_dir: &Path) -> Result<Vec<PathBuf>> {
     }
     packages.sort();
     Ok(packages)
+}
+
+// --- CLI Tool: lint ---
+
+/// Detect package type from directory contents.
+enum PkgType {
+    Rust,
+    Python,
+    Unknown,
+}
+
+fn detect_pkg_type(dir: &Path) -> PkgType {
+    if dir.join("Cargo.toml").exists() {
+        PkgType::Rust
+    } else if dir.join("pyproject.toml").exists() {
+        PkgType::Python
+    } else {
+        PkgType::Unknown
+    }
+}
+
+/// Find all lintable packages under `src_dir` (any dir with Cargo.toml or pyproject.toml).
+fn find_lintable_packages(src_dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut packages = Vec::new();
+    if !src_dir.is_dir() {
+        anyhow::bail!("{} is not a directory", src_dir.display());
+    }
+    for entry in std::fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() && !matches!(detect_pkg_type(&path), PkgType::Unknown) {
+            packages.push(path);
+        }
+    }
+    packages.sort();
+    Ok(packages)
+}
+
+/// Lint one or more packages.
+async fn run_lint(pkg: Option<String>, all: Option<String>, fix: bool) -> Result<()> {
+    println!("Tagentacle Lint");
+    println!("===============");
+
+    let packages: Vec<PathBuf> = if let Some(ws_src) = all {
+        let src_dir = PathBuf::from(&ws_src)
+            .canonicalize()
+            .with_context(|| format!("Directory not found: {}", ws_src))?;
+        find_lintable_packages(&src_dir)?
+    } else if let Some(p) = pkg {
+        let d = PathBuf::from(&p)
+            .canonicalize()
+            .with_context(|| format!("Package directory not found: {}", p))?;
+        vec![d]
+    } else {
+        vec![std::env::current_dir()?]
+    };
+
+    if packages.is_empty() {
+        println!("No lintable packages found.");
+        return Ok(());
+    }
+
+    println!("Packages to lint: {}", packages.len());
+    for p in &packages {
+        println!("  - {}", p.display());
+    }
+    println!();
+
+    let mut total_pass = 0u32;
+    let mut total_fail = 0u32;
+
+    for pkg_dir in &packages {
+        let pkg_name = pkg_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let success = match detect_pkg_type(pkg_dir) {
+            PkgType::Rust => lint_rust(pkg_dir, &pkg_name, fix).await?,
+            PkgType::Python => lint_python(pkg_dir, &pkg_name, fix).await?,
+            PkgType::Unknown => {
+                println!("[{}] ⚠ Unknown package type, skipping.", pkg_name);
+                continue;
+            }
+        };
+
+        if success {
+            total_pass += 1;
+        } else {
+            total_fail += 1;
+        }
+    }
+
+    println!("==========================");
+    println!("Lint Summary: {} passed, {} failed", total_pass, total_fail);
+    println!("==========================");
+
+    if total_fail > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Lint a Rust package: cargo clippy + cargo fmt --check (or --fix).
+async fn lint_rust(pkg_dir: &Path, pkg_name: &str, fix: bool) -> Result<bool> {
+    println!("[{}] Rust lint...", pkg_name);
+    let mut ok = true;
+
+    // clippy
+    {
+        let mut cmd = Command::new("cargo");
+        if fix {
+            cmd.args(["clippy", "--fix", "--allow-dirty", "--allow-staged"]);
+        } else {
+            cmd.args(["clippy", "--", "-D", "warnings"]);
+        }
+        let status = cmd
+            .current_dir(pkg_dir)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .context("Failed to run cargo clippy")?;
+        if !status.success() {
+            println!("[{}] ✗ clippy failed", pkg_name);
+            ok = false;
+        }
+    }
+
+    // fmt
+    {
+        let mut cmd = Command::new("cargo");
+        if fix {
+            cmd.arg("fmt");
+        } else {
+            cmd.args(["fmt", "--check"]);
+        }
+        let status = cmd
+            .current_dir(pkg_dir)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .context("Failed to run cargo fmt")?;
+        if !status.success() {
+            println!("[{}] ✗ fmt failed", pkg_name);
+            ok = false;
+        }
+    }
+
+    if ok {
+        println!("[{}] ✓ PASSED\n", pkg_name);
+    } else {
+        println!("[{}] ✗ FAILED\n", pkg_name);
+    }
+    Ok(ok)
+}
+
+/// Lint a Python package: ruff check + ruff format --check (or --fix).
+async fn lint_python(pkg_dir: &Path, pkg_name: &str, fix: bool) -> Result<bool> {
+    println!("[{}] Python lint...", pkg_name);
+    let mut ok = true;
+
+    // ruff check
+    {
+        let mut args = vec!["tool", "run", "ruff", "check"];
+        if fix {
+            args.push("--fix");
+        }
+        args.push(".");
+        let status = Command::new("uv")
+            .args(&args)
+            .current_dir(pkg_dir)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .context("Failed to run ruff check. Is uv installed?")?;
+        if !status.success() {
+            println!("[{}] ✗ ruff check failed", pkg_name);
+            ok = false;
+        }
+    }
+
+    // ruff format
+    {
+        let args = if fix {
+            vec!["tool", "run", "ruff", "format", "."]
+        } else {
+            vec!["tool", "run", "ruff", "format", "--check", "."]
+        };
+        let status = Command::new("uv")
+            .args(&args)
+            .current_dir(pkg_dir)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .context("Failed to run ruff format. Is uv installed?")?;
+        if !status.success() {
+            println!("[{}] ✗ ruff format failed", pkg_name);
+            ok = false;
+        }
+    }
+
+    if ok {
+        println!("[{}] ✓ PASSED\n", pkg_name);
+    } else {
+        println!("[{}] ✗ FAILED\n", pkg_name);
+    }
+    Ok(ok)
 }
