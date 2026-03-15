@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Roadmap**: Updated to Phase 1 (full-stack-v1) structure — Completed / Phase 1 / Later sections, link to [Project board](https://github.com/orgs/Tagentacle/projects/1).
+- **Project milestone**: full-stack-v1 planning complete — 14 issues across 10 repos, 11 architectural decisions (Q1-Q11). See [example-bringup/docs/](https://github.com/Tagentacle/example-bringup/tree/main/docs) for project documents.
+
 ### Added
 - **`tagentacle test` subcommand**: Run tests for one or all workspace packages.
   - `--pkg <path>`: test a single package.
