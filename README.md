@@ -109,22 +109,29 @@ tagentacle launch src/example-bringup/launch/system_launch.toml
 ### ✅ Completed
 - Rust Daemon (Topic Pub/Sub + Service RPC + node registration/heartbeat)
 - Python SDK dual-layer API (`Node` + `LifecycleNode`)
-- MCPServerNode base class (auto Streamable HTTP + `/mcp/directory`)
+- MCP Server integration (auto Streamable HTTP + `/mcp/directory`)
 - MCP Gateway (stdio→HTTP relay)
 - TACL (JWT auth with `space` claim for container binding)
 - JSON Schema validation (`SchemaRegistry`)
 - Container Orchestrator + Shell Server ecosystem pkgs
 - CLI toolchain (`daemon`, `run`, `launch`, `setup dep`, `doctor`)
+- CI/CD (lint-only GitHub Actions across all repos)
 
-### 🔜 Planned
+### 🔜 Phase 1 — full-stack-v1
+- `MCPServerNode` → `MCPServerComponent` (composable, no inheritance)
+- `python-sdk-agent` new package (MessageQueue / InferenceMux / ContextFactory)
+- `python-sdk-tacl` new package (TACLAuthority + PyJWT)
+- Fine-grained subscription levels (SILENT / TRIGGER)
+- Full-stack message schemas (`mcp-interfaces`)
+- Dual-Agent + Shell-Server demo
+
+### 🔮 Later
 - SDK auto-logging to `/tagentacle/log`
-- Flattened Topic Tools API
-- Interface Packages (cross-node schema contracts)
+- Transport layer abstraction (rmw layer)
 - Action Mode (long-running tasks with progress)
 - Parameter Server
-- Web Dashboard
 
-→ [Full roadmap](https://tagentacle.github.io/docs/roadmap/)
+→ [Project board (full-stack-v1)](https://github.com/orgs/Tagentacle/projects/1)
 
 ---
 

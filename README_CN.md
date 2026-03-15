@@ -109,22 +109,29 @@ tagentacle launch src/example-bringup/launch/system_launch.toml
 ### ✅ 已完成
 - Rust Daemon（Topic Pub/Sub + Service RPC + 节点注册/心跳）
 - Python SDK 双层 API（`Node` + `LifecycleNode`）
-- MCPServerNode 基类（自动 Streamable HTTP + `/mcp/directory`）
+- MCP Server 集成（自动 Streamable HTTP + `/mcp/directory`）
 - MCP Gateway（stdio→HTTP 中继）
 - TACL（JWT 认证 + `space` 容器绑定）
 - JSON Schema 校验（`SchemaRegistry`）
 - Container Orchestrator + Shell Server 生态包
 - CLI 工具链（`daemon`、`run`、`launch`、`setup dep`、`doctor`）
+- CI/CD（所有仓库 lint-only GitHub Actions）
 
-### 🔜 计划中
+### 🔜 Phase 1 — full-stack-v1
+- `MCPServerNode` → `MCPServerComponent`（可组合组件，去继承）
+- `python-sdk-agent` 新包（MessageQueue / InferenceMux / ContextFactory）
+- `python-sdk-tacl` 新包（TACLAuthority + PyJWT）
+- 细粒度订阅级别（SILENT / TRIGGER）
+- 全栈消息 Schema（`mcp-interfaces`）
+- 双 Agent + Shell-Server 演示
+
+### 🔮 后续
 - SDK 自动日志发布到 `/tagentacle/log`
-- 展平 Topic 工具 API
-- Interface Package（跨节点 Schema 契约包）
+- 传输层抽象（rmw layer）
 - Action 模式（长程异步任务 + 进度反馈）
 - Parameter Server
-- Web Dashboard
 
-→ [完整路线图](https://tagentacle.github.io/docs/zh/roadmap/)
+→ [项目看板 (full-stack-v1)](https://github.com/orgs/Tagentacle/projects/1)
 
 ---
 
