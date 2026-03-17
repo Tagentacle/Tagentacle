@@ -49,5 +49,5 @@ class AliceAgent(LifecycleNode):
 
 SDK 内置两个关键节点：
 
-*   **TagentacleMCPServer**：将总线的 `publish`、`subscribe`、`call_service` 等能力暴露为标准 MCP Tool。继承 `MCPServerNode`，自行运行 Streamable HTTP 端点。
+*   **BusMCPServer**（原 TagentacleMCPServer）：将总线的 `publish`、`subscribe`、`call_service` 等能力暴露为标准 MCP Tool。使用 `MCPServerComponent`（组合模式），自行运行 Streamable HTTP 端点。
 *   **MCPGatewayNode**：传输层中继 — 将仅支持 stdio 的传统 MCP Server 适配为 Streamable HTTP，发布远程服务器 URL 到 `/mcp/directory`。

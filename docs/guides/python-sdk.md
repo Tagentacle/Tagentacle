@@ -49,5 +49,5 @@ class AliceAgent(LifecycleNode):
 
 The SDK includes two key built-in nodes:
 
-*   **TagentacleMCPServer**: Exposes the bus's `publish`, `subscribe`, `call_service` and other capabilities as standard MCP Tools. Inherits `MCPServerNode` and runs its own Streamable HTTP endpoint.
+*   **BusMCPServer** (formerly TagentacleMCPServer): Exposes the bus's `publish`, `subscribe`, `call_service` and other capabilities as standard MCP Tools. Uses `MCPServerComponent` (composition) and runs its own Streamable HTTP endpoint.
 *   **MCPGatewayNode**: Transport-level relay — adapts stdio-only legacy MCP Servers to Streamable HTTP, and publishes remote server URLs to `/mcp/directory`.
