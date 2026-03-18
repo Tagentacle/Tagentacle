@@ -85,6 +85,7 @@ nav:
     - Python SDK: guides/python-sdk.md
     - MCP Integration: guides/mcp-integration.md
     - TACL Authentication: guides/tacl.md
+    - Package Management: guides/packaging.md
     - Testing & E2E: guides/testing.md
     - Best Practices: guides/best-practices.md
     - Containers: guides/containers.md
