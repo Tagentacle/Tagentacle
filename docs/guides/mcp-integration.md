@@ -5,7 +5,7 @@ Inspired by ROS 2's TF2 pattern, Tagentacle localizes MCP session management wit
 ## Design Principles
 
 *   **Session Localization**: MCP Client Sessions stay in Agent node memory. Agents connect directly to MCP Servers via native MCP SDK Streamable HTTP client.
-*   **MCPServerNode Base Class**: MCP Servers inherit `MCPServerNode` (LifecycleNode subclass), which auto-runs Streamable HTTP and publishes `MCPServerDescription` to `/mcp/directory`.
+*   **MCPServerComponent**: MCP Servers use `LifecycleNode` + `MCPServerComponent` (composition), which auto-runs Streamable HTTP and publishes `MCPServerDescription` to `/mcp/directory`.
 *   **Unified Discovery**: Agents subscribe to `/mcp/directory` to auto-discover all available MCP servers (native HTTP + Gateway-proxied stdio servers).
 *   **Full Protocol Support**: Direct Agent↔Server sessions preserve all MCP capabilities including sampling, notifications, and resources.
 *   **MCP Gateway**: A separate `mcp-gateway` package provides transport-level stdio→HTTP relay for legacy MCP servers, without parsing MCP semantics.

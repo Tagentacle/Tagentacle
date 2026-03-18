@@ -16,7 +16,7 @@ If you find yourself needing tool-level ACL within a single server, it's a signa
 
 ## MCP Server Transport: Streamable HTTP Only
 
-All MCP Server Node Pkgs in Tagentacle use **Streamable HTTP** as their transport. This is required by the `MCPServerNode` base class and enables:
+All MCP Server Node Pkgs in Tagentacle use **Streamable HTTP** as their transport. This is required by the `MCPServerComponent` and enables:
 
 - Direct Agent↔Server sessions with full MCP protocol support (sampling, notifications, resources)
 - TACL JWT authentication via standard HTTP `Authorization` headers
@@ -29,7 +29,7 @@ All MCP Server Node Pkgs in Tagentacle use **Streamable HTTP** as their transpor
     - stdio sessions are managed by the Gateway process, not the Agent
     - One subprocess per HTTP session limits scalability
 
-    If you control the MCP Server code, always implement it as a Streamable HTTP `MCPServerNode` Pkg.
+    If you control the MCP Server code, always implement it as a Streamable HTTP `LifecycleNode` + `MCPServerComponent` Pkg.
 
 ## Server Design: Unix Philosophy
 

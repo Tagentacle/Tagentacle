@@ -44,7 +44,7 @@ bus_host = os.environ.get("TAGENTACLE_BUS_HOST", "localhost")
 bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
 ```
 
-All higher-level abstractions — `Node`, `LifecycleNode`, `MCPServerNode`, TACL authentication, `/mcp/directory` discovery — work identically inside containers.
+All higher-level abstractions — `Node`, `LifecycleNode`, `MCPServerComponent`, TACL authentication, `/mcp/directory` discovery — work identically inside containers.
 
 ## Container Orchestrator: Bus-Level Container Management
 
@@ -78,7 +78,7 @@ Key design decisions:
 
 ## Shell Server: TACL-Aware Dynamic Routing
 
-The `shell-server` package is an `MCPServerNode` that provides `exec_command` as an MCP tool. It supports three execution modes, resolved per-request:
+The `shell-server` package is a `LifecycleNode` + `MCPServerComponent` that provides `exec_command` as an MCP tool. It supports three execution modes, resolved per-request:
 
 ```
 Container Resolution Order:

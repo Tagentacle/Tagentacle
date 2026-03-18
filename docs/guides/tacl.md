@@ -8,8 +8,8 @@ TACL is built around three roles:
 
 | Role | Component | Responsibility |
 |---|---|---|
-| **Issuer** | `PermissionMCPServerNode` | SQLite-backed agent registry. Issues JWT credentials with tool-level grants. |
-| **Verifier** | `MCPServerNode` (with `auth_required=True`) | Validates Bearer JWT on every request. Sets `CallerIdentity` contextvar. |
+| **Issuer** | `TACLAuthority` | SQLite-backed agent registry. Issues JWT credentials with tool-level grants. |
+| **Verifier** | `MCPServerComponent` (with `auth_required=True`) | Validates Bearer JWT on every request. Sets `CallerIdentity` contextvar. |
 | **Carrier** | `AuthMCPClient` | Authenticates with the permission server, obtains JWT, attaches it to all MCP requests. |
 
 ## JWT Payload Schema
@@ -53,7 +53,7 @@ When the agent authenticates and calls an MCP tool (e.g., `exec_command` on the 
 ## Authentication Flow
 
 ```
-Admin                   PermissionMCPServerNode           MCPServerNode (auth_required)
+Admin                   TACLAuthority                     MCPServerComponent (auth_required)
   │                              │                                │
   ├─ register_agent ────────────▶│                                │
   │  (agent_id, token,           │                                │
@@ -78,4 +78,4 @@ Admin                   PermissionMCPServerNode           MCPServerNode (auth_re
 - **Shared secret**: Both issuer and verifiers read `TAGENTACLE_AUTH_SECRET` from environment.
 - **Contextvar-based**: `CallerIdentity` is set per-request via Python `contextvars`, enabling tool handlers to read caller info without parameter threading.
 - **Granularity**: Authorization supports **tool-level** per server. However, prefer **server-level** control with small, focused servers (see [Best Practices](best-practices.md)).
-- **Optional**: Auth is opt-in. `MCPServerNode(auth_required=False)` (default) accepts all callers.
+- **Optional**: Auth is opt-in. `MCPServerComponent(auth_required=False)` (default) accepts all callers.

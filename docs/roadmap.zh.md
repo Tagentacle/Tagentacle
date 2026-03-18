@@ -7,7 +7,7 @@
 - [x] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
 - [x] ~~**MCP Bridge (Rust)**~~：已在 v0.3.0 移除 — 由 `mcp-gateway`（Python Gateway Node，传输层中继）替代。
 - [x] ~~**MCP Transport 层**~~：已在 python-sdk-mcp v0.2.0 移除 — 由 Streamable HTTP 直连替代。
-- [x] **MCPServerNode 基类**：python-sdk-mcp v0.2.0 — MCP Server Node 基类，自动 Streamable HTTP + `/mcp/directory` 发布。
+- [x] **MCPServerNode 基类**（现为 MCPServerComponent）：python-sdk-mcp v0.2.0 — MCP Server Node 基类，自动 Streamable HTTP + `/mcp/directory` 发布。
 - [x] **MCP Gateway**：mcp-gateway v0.1.0 — 传输层 stdio→HTTP 中继 + 目录服务。
 - [x] **Tagentacle MCP Server**：内置 MCP Server，暴露总线交互工具。
 - [x] **`tagentacle.toml` 规范**：定义并解析包清单格式。
@@ -25,7 +25,7 @@
 - [x] **JSON Schema 校验**：python-sdk-core v0.3.0 — `SchemaRegistry` 自动发现 + 逐节点校验模式。
 - [x] **TACL `space` 声明**：python-sdk-mcp v0.4.0 — JWT `space` 字段将 Agent 绑定到隔离执行环境。
 - [x] **容器编排生态包**：`container-orchestrator` v0.1.0 — LifecycleNode 通过总线服务管理 Docker 容器。
-- [x] **Shell Server 生态包**：`shell-server` v0.1.0 — MCPServerNode 暴露 `exec_command` 工具，支持 TACL `space` 感知的动态容器路由。
+- [x] **Shell Server 生态包**：`shell-server` v0.1.0 — MCPServerNode（现为 LifecycleNode + MCPServerComponent）暴露 `exec_command` 工具，支持 TACL `space` 感知的动态容器路由。
 
 ## 计划中
 

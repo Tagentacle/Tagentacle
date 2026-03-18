@@ -7,7 +7,7 @@
 | 前缀 | 用途 | 管理者 |
 |---|---|---|
 | `/tagentacle/*` | **系统保留。** Daemon 与 SDK 核心功能 | 核心库 |
-| `/mcp/*` | MCP 发现和网关服务 | MCPServerNode / Gateway |
+| `/mcp/*` | MCP 发现和网关服务 | MCPServerComponent / Gateway |
 
 用户自定义 Topic **不应**使用以上前缀。
 
@@ -18,7 +18,7 @@
 | `/tagentacle/log` | `/rosout` | 全局日志聚合。所有节点通过 SDK 自动发布日志；Daemon 也发布系统事件。 | SDK 节点（自动）+ Daemon |
 | `/tagentacle/node_events` | 生命周期事件 | 节点生命周期事件：上线、下线、状态转换。支撑 Dashboard 实时拓扑图。 | Daemon（自动）+ `LifecycleNode`（自动）|
 | `/tagentacle/diagnostics` | `/diagnostics` | 节点健康诊断：心跳、运行时长、消息计数、错误计数。 | SDK `Node.spin()`（定时）|
-| `/mcp/directory` | _（无）_ | MCP 服务器发现。`MCPServerDescription` 由 MCP Server Node 和 Gateway 在激活时发布。Agent 订阅后自动发现服务器。 | MCPServerNode / Gateway |
+| `/mcp/directory` | _（无）_ | MCP 服务器发现。`MCPServerDescription` 由 MCP Server Node 和 Gateway 在激活时发布。Agent 订阅后自动发现服务器。 | MCPServerComponent / Gateway |
 
 ## 标准 Service（Daemon 拦截式）
 

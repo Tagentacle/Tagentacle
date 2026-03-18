@@ -8,8 +8,8 @@ TACL 围绕三个角色构建：
 
 | 角色 | 组件 | 职责 |
 |---|---|---|
-| **签发者** | `PermissionMCPServerNode` | SQLite 支撑的 Agent 注册中心。签发携带工具级授权的 JWT 凭证。 |
-| **验证者** | `MCPServerNode`（`auth_required=True`） | 每次请求验证 Bearer JWT。设置 `CallerIdentity` 上下文变量。 |
+| **签发者** | `TACLAuthority` | SQLite 支撑的 Agent 注册中心。签发携带工具级授权的 JWT 凭证。 |
+| **验证者** | `MCPServerComponent`（`auth_required=True`） | 每次请求验证 Bearer JWT。设置 `CallerIdentity` 上下文变量。 |
 | **携带者** | `AuthMCPClient` | 向权限服务器认证，获取 JWT，附加到所有 MCP 请求。 |
 
 ## JWT 负载格式
@@ -53,7 +53,7 @@ await permission_node.register_agent(
 ## 认证流程
 
 ```
-管理员                  PermissionMCPServerNode           MCPServerNode (auth_required)
+管理员                  TACLAuthority                     MCPServerComponent (auth_required)
   │                              │                                │
   ├─ register_agent ────────────▶│                                │
   │  (agent_id, token,           │                                │
@@ -78,4 +78,4 @@ await permission_node.register_agent(
 - **共享密钥**：签发者和所有验证者均从环境变量 `TAGENTACLE_AUTH_SECRET` 读取密钥。
 - **基于 Contextvar**：`CallerIdentity` 通过 Python `contextvars` 按请求设置，工具处理函数可直接读取调用者信息，无需参数透传。
 - **细粒度**：授权支持每个服务器的**工具级别**。但推荐通过小而专注的服务器实现**服务器级**控制（参见[最佳实践](best-practices.md)）。
-- **可选启用**：认证默认关闭。`MCPServerNode(auth_required=False)`（默认值）接受所有调用者。
+- **可选启用**：认证默认关闭。`MCPServerComponent(auth_required=False)`（默认值）接受所有调用者。

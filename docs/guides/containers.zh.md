@@ -44,7 +44,7 @@ bus_host = os.environ.get("TAGENTACLE_BUS_HOST", "localhost")
 bus_port = int(os.environ.get("TAGENTACLE_BUS_PORT", "19999"))
 ```
 
-所有上层抽象 —— `Node`、`LifecycleNode`、`MCPServerNode`、TACL 认证、`/mcp/directory` 发现 —— 在容器内的行为与裸跑完全一致。
+所有上层抽象 —— `Node`、`LifecycleNode`、`MCPServerComponent`、TACL 认证、`/mcp/directory` 发现 —— 在容器内的行为与裸跑完全一致。
 
 ## 容器编排器：总线级容器管理
 
@@ -78,7 +78,7 @@ tagentacle service call /containers/exec \
 
 ## Shell Server：TACL 感知的动态路由
 
-`shell-server` 包是一个 `MCPServerNode`，将 `exec_command` 作为 MCP 工具暴露。支持三种执行模式，按请求动态解析：
+`shell-server` 包是一个 `LifecycleNode` + `MCPServerComponent`，将 `exec_command` 作为 MCP 工具暴露。支持三种执行模式，按请求动态解析：
 
 ```
 容器解析优先级：
