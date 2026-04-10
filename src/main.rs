@@ -955,8 +955,20 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
 
+        // Global env vars (shared by all nodes)
         for (k, v) in &env_vars {
             cmd.env(k, v);
+        }
+
+        // Per-node env injection: parameters with prefix NODE_NAME_
+        // are stripped of the prefix and injected only for that node.
+        // Example: AGENT_NODE_1_AGENT_ID = "agent_1"
+        //   → agent_node_1 gets AGENT_ID=agent_1
+        let prefix = format!("{}_", node.name.to_uppercase());
+        for (k, v) in &config.parameters {
+            if let Some(real_key) = k.strip_prefix(&prefix) {
+                cmd.env(real_key, v);
+            }
         }
 
         match cmd.spawn() {
