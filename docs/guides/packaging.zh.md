@@ -9,15 +9,15 @@ Tagentacle 采用**逐包虚拟环境**模型——灵感来源于 ROS 2 的 col
 ```
 my_workspace/
 ├── src/                          ← 包源码（git clone）
-│   ├── python-sdk-core/.venv/    ← 独立 venv（零依赖）
-│   ├── python-sdk-mcp/.venv/     ← 独立 venv（mcp, pydantic, …）
+│   ├── tagentacle-py-core/.venv/    ← 独立 venv（零依赖）
+│   ├── tagentacle-py-mcp/.venv/     ← 独立 venv（mcp, pydantic, …）
 │   ├── example-agent/.venv/      ← 独立 venv
 │   ├── example-mcp-server/.venv/
 │   ├── mcp-gateway/.venv/
 │   └── …
 ├── install/                      ← 自动生成（Phase 2）
 │   ├── example_agent/.venv → ../../src/example-agent/.venv
-│   ├── tagentacle_py_core/.venv → ../../src/python-sdk-core/.venv
+│   ├── tagentacle_py_core/.venv → ../../src/tagentacle-py-core/.venv
 │   ├── …
 │   └── setup_env.bash            ← 将所有 .venv/bin 加入 $PATH
 └── （无根级 pyproject.toml）
@@ -30,11 +30,11 @@ my_workspace/
 bringup 包在 `tagentacle.toml` 中声明工作空间依赖：
 
 ```toml
-[workspace.repos.python_sdk_core]
-git = "https://github.com/Tagentacle/python-sdk-core.git"
+[workspace.repos.tagentacle_py_core]
+git = "https://github.com/Tagentacle/tagentacle-py-core.git"
 
-[workspace.repos.python_sdk_mcp]
-git = "https://github.com/Tagentacle/python-sdk-mcp.git"
+[workspace.repos.tagentacle_py_mcp]
+git = "https://github.com/Tagentacle/tagentacle-py-mcp.git"
 ```
 
 CLI 自动将缺失的仓库克隆到 `src/`。
@@ -67,20 +67,20 @@ source install/setup_env.bash
 
 ## SDK 共享——Editable Install
 
-SDK 包（如 `python-sdk-core`）**不会被复制**。每个消费者包在 `pyproject.toml` 中声明 editable source：
+SDK 包（如 `tagentacle-py-core`）**不会被复制**。每个消费者包在 `pyproject.toml` 中声明 editable source：
 
 ```toml
 [project]
 dependencies = ["tagentacle-py-core>=0.1.0"]
 
 [tool.uv.sources]
-tagentacle-py-core = { path = "../python-sdk-core", editable = true }
+tagentacle-py-core = { path = "../tagentacle-py-core", editable = true }
 ```
 
 `uv sync` 运行时，会在消费者的 `.venv/lib/pythonX.Y/site-packages/` 中创建 `.pth` 文件：
 
 ```
-_tagentacle_py_core.pth → /path/to/workspace/src/python-sdk-core
+_tagentacle_py_core.pth → /path/to/workspace/src/tagentacle-py-core
 ```
 
 所有消费者包指向**同一个源目录**。修改 SDK 代码立即对所有包生效。
@@ -126,8 +126,8 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-tagentacle-py-core = { path = "../python-sdk-core", editable = true }
-tagentacle-py-mcp = { path = "../python-sdk-mcp", editable = true }
+tagentacle-py-core = { path = "../tagentacle-py-core", editable = true }
+tagentacle-py-mcp = { path = "../tagentacle-py-mcp", editable = true }
 ```
 
 `path` 使用 `src/` 内的相对路径——因为所有包是同级目录，`../` 总是有效。

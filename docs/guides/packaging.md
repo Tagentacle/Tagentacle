@@ -9,15 +9,15 @@ After running `tagentacle setup dep --all src`, a workspace looks like:
 ```
 my_workspace/
 ├── src/                          ← Package source (git-cloned)
-│   ├── python-sdk-core/.venv/    ← Independent venv (zero deps)
-│   ├── python-sdk-mcp/.venv/     ← Independent venv (mcp, pydantic, …)
+│   ├── tagentacle-py-core/.venv/    ← Independent venv (zero deps)
+│   ├── tagentacle-py-mcp/.venv/     ← Independent venv (mcp, pydantic, …)
 │   ├── example-agent/.venv/      ← Independent venv
 │   ├── example-mcp-server/.venv/
 │   ├── mcp-gateway/.venv/
 │   └── …
 ├── install/                      ← Auto-generated (Phase 2)
 │   ├── example_agent/.venv → ../../src/example-agent/.venv
-│   ├── tagentacle_py_core/.venv → ../../src/python-sdk-core/.venv
+│   ├── tagentacle_py_core/.venv → ../../src/tagentacle-py-core/.venv
 │   ├── …
 │   └── setup_env.bash            ← Adds all .venv/bin to $PATH
 └── (no root-level pyproject.toml)
@@ -30,11 +30,11 @@ my_workspace/
 The bringup package declares workspace dependencies in `tagentacle.toml`:
 
 ```toml
-[workspace.repos.python_sdk_core]
-git = "https://github.com/Tagentacle/python-sdk-core.git"
+[workspace.repos.tagentacle_py_core]
+git = "https://github.com/Tagentacle/tagentacle-py-core.git"
 
-[workspace.repos.python_sdk_mcp]
-git = "https://github.com/Tagentacle/python-sdk-mcp.git"
+[workspace.repos.tagentacle_py_mcp]
+git = "https://github.com/Tagentacle/tagentacle-py-mcp.git"
 ```
 
 The CLI clones any missing repos into `src/`.
@@ -67,20 +67,20 @@ source install/setup_env.bash
 
 ## SDK Sharing via Editable Installs
 
-SDK packages (like `python-sdk-core`) are **not duplicated**. Each consumer package declares an editable source in `pyproject.toml`:
+SDK packages (like `tagentacle-py-core`) are **not duplicated**. Each consumer package declares an editable source in `pyproject.toml`:
 
 ```toml
 [project]
 dependencies = ["tagentacle-py-core>=0.1.0"]
 
 [tool.uv.sources]
-tagentacle-py-core = { path = "../python-sdk-core", editable = true }
+tagentacle-py-core = { path = "../tagentacle-py-core", editable = true }
 ```
 
 When `uv sync` runs, it creates a `.pth` file in the consumer's `.venv/lib/pythonX.Y/site-packages/`:
 
 ```
-_tagentacle_py_core.pth → /path/to/workspace/src/python-sdk-core
+_tagentacle_py_core.pth → /path/to/workspace/src/tagentacle-py-core
 ```
 
 All consumer packages point to the **same source directory**. Editing SDK code takes immediate effect across all packages.
@@ -126,8 +126,8 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-tagentacle-py-core = { path = "../python-sdk-core", editable = true }
-tagentacle-py-mcp = { path = "../python-sdk-mcp", editable = true }
+tagentacle-py-core = { path = "../tagentacle-py-core", editable = true }
+tagentacle-py-mcp = { path = "../tagentacle-py-mcp", editable = true }
 ```
 
 The `path` uses relative references from within `src/` — since all packages are siblings, `../` always works.

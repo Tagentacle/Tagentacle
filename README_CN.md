@@ -119,8 +119,8 @@ tagentacle launch src/example-bringup/launch/system_launch.toml
 
 ### 🔜 Phase 1 — full-stack-v1
 - `MCPServerNode` → `MCPServerComponent`（可组合组件，去继承）
-- `python-sdk-agent` 新包（MessageQueue / InferenceMux / ContextFactory）
-- `python-sdk-tacl` 新包（TACLAuthority + PyJWT）
+- `tagentacle-py-inferencemux` 新包（MessageQueue / InferenceMux / ContextFactory）
+- `tagentacle-py-tacl` 新包（TACLAuthority + PyJWT）
 - 细粒度订阅级别（SILENT / TRIGGER）
 - 全栈消息 Schema（`mcp-interfaces`）
 - 双 Agent + Shell-Server 演示
@@ -139,8 +139,8 @@ tagentacle launch src/example-bringup/launch/system_launch.toml
 
 欢迎贡献！各组件变更日志：
 - [tagentacle (Rust 核心)](CHANGELOG.md)
-- [python-sdk-core](https://github.com/Tagentacle/python-sdk-core/blob/main/CHANGELOG.md)
-- [python-sdk-mcp](https://github.com/Tagentacle/python-sdk-mcp/blob/main/CHANGELOG.md)
+- [tagentacle-py-core](https://github.com/Tagentacle/tagentacle-py-core/blob/main/CHANGELOG.md)
+- [tagentacle-py-mcp](https://github.com/Tagentacle/tagentacle-py-mcp/blob/main/CHANGELOG.md)
 
 ## 📄 许可证
 

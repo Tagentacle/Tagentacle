@@ -1,6 +1,6 @@
 # TACL：Tagentacle 访问控制层
 
-**TACL**（Tagentacle Access Control Layer）提供 MCP 级别的 JWT 认证与授权。它完全实现在 Python SDK（`python-sdk-mcp`）中 —— Daemon 对访问控制一无所知，忠实遵循「只提供机制，不制定策略」的原则。
+**TACL**（Tagentacle Access Control Layer）提供 MCP 级别的 JWT 认证与授权。它完全实现在 Python SDK（`tagentacle-py-mcp`）中 —— Daemon 对访问控制一无所知，忠实遵循「只提供机制，不制定策略」的原则。
 
 ## 架构
 
