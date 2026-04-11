@@ -18,7 +18,7 @@ User-defined Topics should **not** use the above prefixes.
 | `/tagentacle/log` | ROS `/rosout` | Global log aggregation. All nodes auto-publish logs here via SDK; Daemon also publishes system events. | SDK Nodes (auto) + Daemon |
 | `/tagentacle/node_events` | ROS lifecycle events | Node lifecycle events: connected, disconnected, lifecycle state transitions. Powers real-time topology in dashboards. | Daemon (auto) + `LifecycleNode` (auto) |
 | `/tagentacle/diagnostics` | ROS `/diagnostics` | Node health reports: heartbeat, uptime, message counters, error counts. | SDK `Node.spin()` (periodic) |
-| `/mcp/directory` | _(none)_ | MCP server discovery. `MCPServerDescription` messages published by MCP Server Nodes and Gateway on activation. Agents subscribe to auto-discover servers. | MCPServerComponent / Gateway |
+| `/mcp/directory` | _(none)_ | MCP server discovery. `MCPServerDescription` published by `MCPServerComponent` and Gateway on activation. Agents subscribe to auto-discover servers; late-joiners pull via `/mcp/gateway/list_servers`. | MCPServerComponent / Gateway |
 
 ## Standard Services (Daemon-intercepted)
 

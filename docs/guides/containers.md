@@ -98,7 +98,7 @@ Agent Gamma (JWT: no space)            ──▶ Shell Server ──▶ local su
 ## End-to-End: From Registration to Isolated Execution
 
 ```
-1. Admin registers agent:          PermissionNode.register_agent(space="agent_space_1")
+1. Admin registers agent:          TACLAuthority.register_agent(space="agent_space_1")
 2. Orchestrator creates container: /containers/create → docker run agent_space_1
 3. Agent authenticates:            AuthMCPClient → JWT {agent_id, space: "agent_space_1"}
 4. Agent calls exec_command:       Shell Server reads JWT.space → docker exec agent_space_1

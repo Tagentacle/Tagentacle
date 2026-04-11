@@ -98,7 +98,7 @@ Agent Gamma (JWT: 无 space)            ──▶ Shell Server ──▶ 本地 
 ## 端到端：从注册到隔离执行
 
 ```
-1. 管理员注册 Agent：           PermissionNode.register_agent(space="agent_space_1")
+1. 管理员注册 Agent：           TACLAuthority.register_agent(space="agent_space_1")
 2. 编排器创建容器：             /containers/create → docker run agent_space_1
 3. Agent 认证：                 AuthMCPClient → JWT {agent_id, space: "agent_space_1"}
 4. Agent 执行命令：             Shell Server 读取 JWT.space → docker exec agent_space_1
