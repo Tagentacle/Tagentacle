@@ -7,6 +7,7 @@
 *   **会话本地化**：MCP Client Session 保持在 Agent 节点内存中。Agent 通过原生 MCP SDK HTTP Client 直连 MCP Server 的 Streamable HTTP 端点。
 *   **MCPServerComponent 组件**：MCP Server 使用 `LifecycleNode` + `MCPServerComponent`（组合模式），自动运行 Streamable HTTP 服务并在激活时向 `/mcp/directory` Topic 发布 `MCPServerDescription`。
 *   **统一发现**：Agent 订阅 `/mcp/directory` Topic 即可自动发现所有可用 MCP Server（包括原生 HTTP Server 和 Gateway 代理的 stdio Server）。
+*   **Gateway 中央注册表**：MCP Gateway 同时订阅 `/mcp/directory` 并缓存所有服务器条目。后加入的 Agent 启动时调用 `/mcp/gateway/list_servers` 一次即可发现早于自己启动的服务器 — 推（订阅）+拉（一次性查询）结合，确保可靠发现。
 *   **完整协议支持**：因 MCP 会话直接在 Agent ↔ Server 之间建立，所有 MCP 功能（sampling、notifications、resources 等）原生可用。
 *   **MCP Gateway**：独立 `mcp-gateway` 包提供传输层 stdio→HTTP 中继，不解析 MCP 语义。
 

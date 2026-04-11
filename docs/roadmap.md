@@ -26,6 +26,12 @@
 - [x] **TACL `space` Claim**: `tagentacle-py-mcp` v0.4.0 — JWT `space` field binding agents to isolated execution environments. Full stack: `CallerIdentity.space`, `sign_credential(space=...)`, `PermissionMCPServerNode.register_agent(space=...)` (PermissionMCPServerNode is now TACLAuthority).
 - [x] **Container Orchestration Pkg**: `container-orchestrator` v0.1.0 — LifecycleNode managing Docker containers via bus services (`/containers/create`, `stop`, `list`, `exec`, etc.).
 - [x] **Shell Server Pkg**: `shell-server` v0.1.0 — MCPServerNode (now LifecycleNode + MCPServerComponent) exposing `exec_command` tool with TACL `space`-aware dynamic container routing (JWT → container → local fallback).
+- [x] **Graceful Ctrl-C Shutdown**: Bringup launcher async signal handler with SIGTERM→wait→SIGKILL cascade. All children terminated cleanly on Ctrl-C. (issue #15)
+- [x] **Gateway Central MCP Registry**: `mcp-gateway` subscribes to `/mcp/directory` and caches all server entries. Agents call `/mcp/gateway/list_servers` once at startup for pull-based discovery.
+- [x] **Agent MCP Retry**: `example-agent` MCP session connect with exponential backoff (max 10 attempts). Agent works without MCP servers.
+- [x] **CI Coverage**: Lint CI (ruff check + format) across all app packages: example-agent, example-mcp-server, example-inference, example-memory, example-frontend, mcp-gateway, shell-server, container-orchestrator.
+- [x] **InferenceMux**: `tagentacle-py-inferencemux` — IDLE/BUSY state machine + followup queue for agentic inference loop trigger control.
+- [x] **E2E System Tests**: `test-bringup` — 13 system tests covering dual-agent chat, MCP tool use, memory persistence, gateway relay, container ops. Active readiness polling (no sleep).
 
 ## Planned
 

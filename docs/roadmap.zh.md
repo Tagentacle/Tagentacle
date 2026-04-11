@@ -26,6 +26,12 @@
 - [x] **TACL `space` 声明**：tagentacle-py-mcp v0.4.0 — JWT `space` 字段将 Agent 绑定到隔离执行环境。
 - [x] **容器编排生态包**：`container-orchestrator` v0.1.0 — LifecycleNode 通过总线服务管理 Docker 容器。
 - [x] **Shell Server 生态包**：`shell-server` v0.1.0 — MCPServerNode（现为 LifecycleNode + MCPServerComponent）暴露 `exec_command` 工具，支持 TACL `space` 感知的动态容器路由。
+- [x] **Ctrl-C 优雅退出**：Bringup 启动器异步信号处理，SIGTERM→等待→SIGKILL 级联。所有子进程在 Ctrl-C 时干净退出。(issue #15)
+- [x] **Gateway 中央 MCP 注册表**：`mcp-gateway` 订阅 `/mcp/directory` 并缓存所有服务器条目。Agent 启动时调用 `/mcp/gateway/list_servers` 一次完成拉取式发现。
+- [x] **Agent MCP 重试**：`example-agent` MCP 会话连接支持指数退避重试（最多 10 次）。Agent 无 MCP 服务器时仍可工作。
+- [x] **CI 覆盖**：所有应用包的 Lint CI（ruff check + format）：example-agent、example-mcp-server、example-inference、example-memory、example-frontend、mcp-gateway、shell-server、container-orchestrator。
+- [x] **InferenceMux**：`tagentacle-py-inferencemux` — IDLE/BUSY 状态机 + 后续队列，用于 Agent 推理循环触发控制。
+- [x] **E2E 系统测试**：`test-bringup` — 13 个系统测试覆盖双 Agent 聊天、MCP 工具调用、记忆持久化、网关中继、容器操作。主动就绪轮询（无 sleep）。
 
 ## 计划中
 
