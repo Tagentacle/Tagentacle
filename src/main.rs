@@ -60,6 +60,9 @@ enum Commands {
         /// Daemon address
         #[arg(short, long, default_value = "127.0.0.1:19999")]
         addr: String,
+        /// Detach after starting all nodes (don't wait or kill on exit)
+        #[arg(long)]
+        detach: bool,
     },
     /// Install dependencies for a package or the entire workspace
     Setup {
@@ -391,8 +394,8 @@ async fn main() -> Result<()> {
         Some(Commands::Run { pkg, addr }) => {
             run_package(pkg, addr).await?;
         }
-        Some(Commands::Launch { config, addr }) => {
-            run_launch(config, addr).await?;
+        Some(Commands::Launch { config, addr, detach }) => {
+            run_launch(config, addr, detach).await?;
         }
         Some(Commands::Setup { action }) => match action {
             SetupAction::Dep { pkg, all } => {
@@ -814,7 +817,7 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
 
 // --- CLI Tool: launch ---
 
-async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
+async fn run_launch(config_path: String, daemon_addr: String, detach: bool) -> Result<()> {
     let config_file = PathBuf::from(&config_path)
         .canonicalize()
         .with_context(|| format!("Launch config not found: {}", config_path))?;
@@ -995,6 +998,16 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
 
     if processes.is_empty() {
         println!("No nodes launched.");
+        return Ok(());
+    }
+
+    if detach {
+        println!("\n{} node(s) launched (detached).", processes.len());
+        // Leak child handles so they continue running after we exit
+        for (_name, proc) in processes {
+            // Dropping without kill/wait lets the child be inherited by init
+            std::mem::forget(proc);
+        }
         return Ok(());
     }
 
