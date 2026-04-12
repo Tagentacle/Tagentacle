@@ -873,7 +873,19 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
                 "TAGENTACLE_SECRETS_FILE".to_string(),
                 secrets_path.to_string_lossy().to_string(),
             );
-            println!("Secrets: {} ✓", secrets_path.display());
+            // Parse secrets.toml and inject top-level string values as env vars
+            let secrets_content = std::fs::read_to_string(&secrets_path)?;
+            if let Ok(secrets_table) = secrets_content.parse::<toml::Table>() {
+                let count = secrets_table.len();
+                for (k, v) in &secrets_table {
+                    if let toml::Value::String(s) = v {
+                        env_vars.insert(k.clone(), s.clone());
+                    }
+                }
+                println!("Secrets: {} ({} keys) ✓", secrets_path.display(), count);
+            } else {
+                eprintln!("Secrets: {} (parse error, path-only)", secrets_path.display());
+            }
         } else {
             println!("Secrets: {} (not found, skipped)", secrets_path.display());
         }
@@ -1497,7 +1509,7 @@ fn read_test_config(pkg_dir: &Path) -> Result<(Vec<String>, Vec<String>)> {
 
 /// Ensure test dependencies are synced for a package (reads [tool.tagentacle.test]).
 async fn sync_test_deps(pkg_dir: &Path, pkg_name: &str) -> Result<()> {
-    let (requires, _extras) = read_test_config(pkg_dir)?;
+    let (requires, extras) = read_test_config(pkg_dir)?;
 
     if !requires.is_empty() {
         println!("[{}] Test requires: {}", pkg_name, requires.join(", "));
@@ -1532,18 +1544,20 @@ async fn sync_test_deps(pkg_dir: &Path, pkg_name: &str) -> Result<()> {
         }
     }
 
-    // Sync the test package itself
+    // Sync the test package itself (always run to ensure extras are installed)
     let pyproject = pkg_dir.join("pyproject.toml");
-    if pyproject.exists() && !pkg_dir.join(".venv").exists() {
-        println!("[{}] Syncing package deps...", pkg_name);
-        let status = Command::new("uv")
-            .arg("sync")
-            .current_dir(pkg_dir)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .await
-            .context("Failed to run uv sync")?;
+    if pyproject.exists() {
+        let mut cmd = Command::new("uv");
+        cmd.arg("sync").current_dir(pkg_dir);
+        for extra in &extras {
+            cmd.args(["--extra", extra]);
+        }
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+
+        if !extras.is_empty() {
+            println!("[{}] Syncing with extras: {}", pkg_name, extras.join(", "));
+        }
+        let status = cmd.status().await.context("Failed to run uv sync")?;
         if !status.success() {
             println!("[{}] ⚠ uv sync failed", pkg_name);
         }
