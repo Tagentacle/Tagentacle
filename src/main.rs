@@ -1129,7 +1129,7 @@ async fn run_setup_dep(pkg_path: String) -> Result<()> {
     println!("[{}] Running uv sync in {}...", pkg_name, pkg_dir.display());
 
     let mut child = Command::new("uv")
-        .arg("sync")
+        .args(["sync", "--all-extras"])
         .current_dir(&pkg_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
